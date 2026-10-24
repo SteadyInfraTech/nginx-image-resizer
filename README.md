@@ -48,7 +48,7 @@ The integration suite exercises the real HTTP service and checks output dimensio
 - Cold transformations consume CPU and memory. Large originals, many sizes, and high concurrency can be expensive. The 8 MiB image-filter buffer rejects sources that exceed the configured buffer; this is not a complete memory or CPU budget for the whole service.
 - Arbitrary sizes can fragment the cache; dimension bounds reduce but do not eliminate this.
 - Replacing an original at the same path does not automatically invalidate an existing cached variant. Use a versioned URL/query or wait for expiry; no purge API is implemented. Cache bypass forces an upstream fetch but deliberately does not update the cache entry.
-- The integration suite verifies stale-on-503 behavior for an expired cached entry. Timeout behavior, sustained origin failure, and high-load behavior still need deployment-specific testing.
+- The integration suite builds NGINX with a one-second cache TTL override to verify stale-on-503 behavior for an expired cached entry; the default production image retains the ten-minute TTL. Timeout behavior, sustained origin failure, and high-load behavior still need deployment-specific testing.
 - The edge cache is local to one instance; replicas do not share cache contents automatically.
 - This is not a full image CDN or media platform. Advanced codecs, cropping, focal points, authorization, purge APIs, and global delivery are out of scope.
 
