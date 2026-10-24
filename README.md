@@ -92,7 +92,7 @@ Use an existing Docker network in place of `your-private-network` (or create it 
 
 ## Network and request flow
 
-One NGINX process serves the edge on port `8080` and a transformer on `127.0.0.1:8082`. The edge caches resized response bytes; the transformer is loopback-only.
+NGINX serves the edge on port `8080` and a transformer on `127.0.0.1:8082`. The transformer fetches originals through a separate, private validator service. The validator reads bounded encoded bytes and parses PNG/GIF/JPEG dimensions before NGINX image_filter decodes pixels; only validated source bytes reach the transformer. The edge caches resized response bytes.
 
 ```text
 Client / load balancer
@@ -105,6 +105,9 @@ NGINX edge :8080 -- cache hit --> return cached image
 NGINX transformer 127.0.0.1:8082
         |
         v
+Private dimension validator :8082
+        |
+        v
 Fixed image origin :8081
 ```
 
@@ -115,8 +118,8 @@ The integration suite checks resize dimensions and aspect ratio, cache MISS then
 ## Limitations
 
 - The image-filter module is separate and depends on GD; package availability and module paths vary by distribution.
-- The demo tests PNG only and makes no claims about WebP, AVIF, animated images, or metadata/profile preservation.
-- Transformations consume CPU and memory. The 8 MiB image-filter buffer caps encoded response bytes, **not decoded pixel allocation**; a highly compressed image with huge dimensions can still demand substantial memory during decoding. NGINX's image-filter module does not provide a source-pixel limit. Trust the origin or validate image dimensions/pixel count with a decoder designed for untrusted input before it reaches NGINX. Set an OS/container memory limit (the direct-TLS example requires `NGINX_MEMORY_LIMIT`), tune concurrency against measurements, and understand that an OOM kill can interrupt requests. These controls contain risk but do not replace decoder-level pixel limits.
+- The validator accepts PNG, JPEG, and GIF headers only. The demo tests PNG; it makes no claims about WebP, AVIF, animated-image semantics, or metadata/profile preservation.
+- Transformations consume CPU and memory. The private validator caps encoded source bytes at 8 MiB, source dimensions at 8192 per side, and source pixels at 16,777,216 by default. It parses PNG/GIF/JPEG headers without decoding pixels and rejects unknown, malformed, oversized, or over-pixel-limit inputs before they reach NGINX image_filter. These defaults are configurable through the validator service environment. This reduces decompression-bomb exposure but does not eliminate parser vulnerabilities, all malformed-file risks, or memory pressure from accepted images; retain OS/container memory limits and tune concurrency. The direct-TLS example requires `NGINX_MEMORY_LIMIT`.
 - Arbitrary sizes can fragment the cache; dimension bounds reduce but do not eliminate this.
 - Updating an original at the same path does not automatically invalidate cached variants. Use a versioned URL/query or wait for expiry; there is no purge API.
 - CI uses a one-second TTL override for stale-on-503 testing; the default image retains a ten-minute TTL. Timeout behavior, sustained origin failure, high-load behavior, TLS renewal, and load-balancer integration need deployment-specific testing.
