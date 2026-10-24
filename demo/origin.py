@@ -32,7 +32,7 @@ PNG = make_png()
 PNG_VERSION_2 = make_png(color=(196, 82, 59))
 CORRUPT_PNG = b"\x89PNG\r\n\x1a\n" + b"not-a-valid-png-chunk"
 OVERSIZED_PNG = make_oversized_png()
-PNG_DIMENSION_BOMB = (b"\\x89PNG\\r\\n\\x1a\\n"
+PNG_DIMENSION_BOMB = (b"\x89PNG\r\n\x1a\n"
                      + png_chunk(b"IHDR", struct.pack(">IIBBBBB", 50000, 50000, 8, 2, 0, 0, 0))
                      + png_chunk(b"IDAT", zlib.compress(b""))
                      + png_chunk(b"IEND", b""))
