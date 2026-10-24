@@ -20,14 +20,15 @@ To run the demo interactively:
     curl -i http://localhost:8080/77x77/sample.png
     docker compose down
 
-The origin serves a deterministic synthetic PNG; no external image host is needed.
+The origin serves deterministic synthetic PNG fixtures; no external image host is needed.
 
 ## Request contract
 
 - /{width}x{height}/{origin-relative-path}
 - Width and height are bounded to 1–2048.
 - The upstream origin is fixed by configuration; clients cannot provide an arbitrary origin URL.
-- The cache key includes the URI, so requested sizes are separate variants.
+- The cache key includes the URI and query string, so requested sizes and query-based cache-busting versions are separate variants.
+- Use immutable/versioned source paths or a version query such as `?version=2` when the source changes. A cached response for an unchanged URL can remain stale until its 10-minute cache TTL expires.
 - X-Cache-Status exposes cache state for demo and test purposes.
 
 ## Network exposure
@@ -36,15 +37,15 @@ Only the edge service publishes a host port. The transformer server listens on 1
 
 ## CI coverage
 
-The integration suite exercises the real HTTP service and checks that output dimensions fit the requested resize box while preserving the source aspect ratio, cache MISS then HIT, variant separation, malformed dimensions, traversal-like paths, missing origin objects, non-image responses, and concurrent requests.
+The integration suite exercises the real HTTP service and checks output dimensions/aspect ratio, cache MISS then HIT, cache-busting query variants for a changed source at the same path, variant separation, invalid dimensions, literal and encoded traversal attempts, missing origin objects, preservation of upstream 503, malformed image bytes, non-image responses, originals larger than the configured 8 MiB image-filter buffer, and concurrent same-key and distinct transformations.
 
 ## Limitations and threat model
 
 - ngx_http_image_filter_module is a separate module and depends on GD. Package availability and module paths vary by NGINX distribution/build.
 - Format support depends on the module and GD build. The demo tests PNG only; it makes no claims about WebP, AVIF, animated images, or metadata/profile preservation.
-- Cold transformations consume CPU and memory. Large originals, many sizes, and high concurrency can be expensive.
+- Cold transformations consume CPU and memory. Large originals, many sizes, and high concurrency can be expensive. The 8 MiB image-filter buffer rejects sources that exceed the configured buffer; this is not a complete memory or CPU budget for the whole service.
 - Arbitrary sizes can fragment the cache; dimension bounds reduce but do not eliminate this.
-- Replacing an original at the same path can leave a cached variant stale until expiry. Prefer immutable/versioned source paths or implement and test invalidation.
+- Replacing an original at the same path does not automatically invalidate an existing cached variant. Use a versioned URL/query or wait for expiry; no purge API is implemented.
 - proxy_cache_lock reduces duplicate fills for the same key, but failure/high-load behavior still needs deployment-specific testing.
 - The edge cache is local to one instance; replicas do not share cache contents automatically.
 - This is not a full image CDN or media platform. Advanced codecs, cropping, focal points, authorization, purge APIs, and global delivery are out of scope.
@@ -73,7 +74,7 @@ flowchart TB
     client
       | GET /77x77/sample.png
       v
-    NGINX edge :8080 -- proxy_cache (URI includes size)
+    NGINX edge :8080 -- proxy_cache (URI + query)
       | cache miss via loopback
       v
     NGINX transformer 127.0.0.1:8082 -- image_filter

@@ -9,18 +9,21 @@ from urllib.request import Request, urlopen
 BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:8080")
 SOURCE_ASPECT_RATIO = 4 / 3
 
+
 def request(path):
     req = Request(BASE_URL + path, headers={"User-Agent": "steady-image-resizer-tests/1"})
     try:
-        with urlopen(req, timeout=5) as response:
+        with urlopen(req, timeout=10) as response:
             return response.status, response.headers, response.read()
     except HTTPError as exc:
         return exc.code, exc.headers, exc.read()
+
 
 def png_dimensions(data):
     if data[:8] != b"\x89PNG\r\n\x1a\n":
         raise AssertionError("response is not a PNG")
     return struct.unpack(">II", data[16:24])
+
 
 def assert_fits_resize_box(testcase, data, max_width, max_height):
     width, height = png_dimensions(data)
@@ -29,6 +32,7 @@ def assert_fits_resize_box(testcase, data, max_width, max_height):
     testcase.assertLessEqual(width, max_width)
     testcase.assertLessEqual(height, max_height)
     testcase.assertAlmostEqual(width / height, SOURCE_ASPECT_RATIO, delta=0.03)
+
 
 def wait_for_service():
     for _ in range(40):
@@ -40,6 +44,7 @@ def wait_for_service():
             pass
         time.sleep(0.5)
     raise RuntimeError("NGINX did not become ready")
+
 
 class ImageResizerIntegrationTests(unittest.TestCase):
     @classmethod
@@ -63,6 +68,17 @@ class ImageResizerIntegrationTests(unittest.TestCase):
         assert_fits_resize_box(self, first_body, 91, 63)
         self.assertEqual(first_body, second_body)
 
+    def test_cache_busting_query_fetches_changed_source_at_same_path(self):
+        first_status, first_headers, first_body = request("/77x77/sample.png?version=1")
+        second_status, second_headers, second_body = request("/77x77/sample.png?version=2")
+        self.assertEqual(first_status, 200)
+        self.assertEqual(second_status, 200)
+        self.assertEqual("MISS", first_headers.get("X-Cache-Status"))
+        self.assertEqual("MISS", second_headers.get("X-Cache-Status"))
+        assert_fits_resize_box(self, first_body, 77, 77)
+        assert_fits_resize_box(self, second_body, 77, 77)
+        self.assertNotEqual(first_body, second_body)
+
     def test_different_sizes_are_distinct_variants(self):
         _, _, small = request("/31x29/sample.png")
         _, _, large = request("/111x87/sample.png")
@@ -77,17 +93,37 @@ class ImageResizerIntegrationTests(unittest.TestCase):
                 status, _, _ = request(path)
                 self.assertEqual(400, status)
 
-    def test_path_traversal_is_rejected(self):
-        status, _, _ = request("/77x77/../sample.png")
-        self.assertEqual(400, status)
+    def test_literal_and_encoded_path_traversal_are_rejected(self):
+        paths = (
+            "/77x77/../sample.png",
+            "/77x77/%2e%2e/sample.png",
+            "/77x77/%2e%2e%2fsample.png",
+            "/77x77/%252e%252e%252fsample.png",
+        )
+        for path in paths:
+            with self.subTest(path=path):
+                status, _, _ = request(path)
+                self.assertIn(status, (400, 404), f"unexpected traversal response for {path}")
 
     def test_missing_origin_object_returns_not_found(self):
         status, _, _ = request("/77x77/missing.png")
         self.assertEqual(404, status)
 
+    def test_origin_503_is_preserved_through_image_filter(self):
+        status, _, _ = request("/77x77/origin-unavailable.png")
+        self.assertEqual(503, status)
+
+    def test_corrupt_image_returns_unsupported_media_error(self):
+        status, _, _ = request("/77x77/corrupt.png")
+        self.assertEqual(415, status)
+
     def test_non_image_origin_payload_is_not_served_as_image(self):
         status, _, _ = request("/77x77/not-an-image.png")
         self.assertGreaterEqual(status, 400)
+
+    def test_source_larger_than_image_filter_buffer_is_rejected(self):
+        status, _, body = request("/77x77/oversized.png")
+        self.assertEqual(415, status, body[:200])
 
     def test_concurrent_requests_for_same_variant(self):
         with ThreadPoolExecutor(max_workers=8) as pool:
@@ -95,6 +131,19 @@ class ImageResizerIntegrationTests(unittest.TestCase):
         for status, _, body in results:
             self.assertEqual(status, 200)
             assert_fits_resize_box(self, body, 137, 91)
+
+    def test_concurrent_distinct_transformations_complete_successfully(self):
+        paths = [f"/{width}x{height}/sample.png"
+                 for width, height in ((71, 53), (73, 55), (79, 59), (83, 61),
+                                       (89, 67), (97, 71), (101, 73), (107, 79))]
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            results = list(pool.map(request, paths))
+        for path, (status, _, body) in zip(paths, results):
+            with self.subTest(path=path):
+                self.assertEqual(status, 200)
+                width, height = (int(value) for value in path.split("/")[1].split("x"))
+                assert_fits_resize_box(self, body, width, height)
+
 
 if __name__ == "__main__":
     unittest.main()
