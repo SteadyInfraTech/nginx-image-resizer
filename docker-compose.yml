@@ -24,6 +24,7 @@ services:
       dockerfile: tests/Dockerfile
     environment:
       BASE_URL: http://nginx:8080
+      ORIGIN_CONTROL_URL: http://origin:8081
     depends_on:
       nginx:
         condition: service_healthy
