@@ -13,7 +13,7 @@ def gif_header(width, height):
 
 
 def gif_with_frame(screen_width, screen_height, frame_width, frame_height):
-    descriptor = (b"\\x2c" + struct.pack("<HHHH", 0, 0, frame_width, frame_height)
+    descriptor = (bytes([0x2C]) + struct.pack("<HHHH", 0, 0, frame_width, frame_height)
                   + bytes([0]))
     image_data = bytes([2, 1, 0, 0])  # LZW code size, one-byte sub-block, terminator.
     return (b"GIF89a" + struct.pack("<HH", screen_width, screen_height)
