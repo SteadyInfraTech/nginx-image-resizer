@@ -68,6 +68,24 @@ class ImageResizerIntegrationTests(unittest.TestCase):
         assert_fits_resize_box(self, first_body, 91, 63)
         self.assertEqual(first_body, second_body)
 
+    def test_bypass_cache_argument_skips_lookup_and_storage(self):
+        bypass_path = "/77x77/sample.png?version=1&bypass_cache=1"
+        first_status, first_headers, first_body = request(bypass_path)
+        second_status, second_headers, second_body = request(bypass_path)
+        self.assertEqual(first_status, 200)
+        self.assertEqual(second_status, 200)
+        self.assertEqual("BYPASS", first_headers.get("X-Cache-Status"))
+        self.assertEqual("BYPASS", second_headers.get("X-Cache-Status"))
+        self.assertEqual(first_body, second_body)
+
+        normal_path = "/77x77/sample.png?version=1"
+        normal_first_status, normal_first_headers, _ = request(normal_path)
+        normal_second_status, normal_second_headers, _ = request(normal_path)
+        self.assertEqual(normal_first_status, 200)
+        self.assertEqual(normal_second_status, 200)
+        self.assertEqual("MISS", normal_first_headers.get("X-Cache-Status"))
+        self.assertEqual("HIT", normal_second_headers.get("X-Cache-Status"))
+
     def test_cache_busting_query_fetches_changed_source_at_same_path(self):
         first_status, first_headers, first_body = request("/77x77/sample.png?version=1")
         second_status, second_headers, second_body = request("/77x77/sample.png?version=2")
