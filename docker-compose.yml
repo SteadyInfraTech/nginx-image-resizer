@@ -17,6 +17,7 @@ services:
     # space only for its PID, cache, and temporary files.
     read_only: true
     cap_drop: [ALL]
+    cap_add: [SETUID, SETGID]
     security_opt:
       - no-new-privileges:true
     tmpfs:
