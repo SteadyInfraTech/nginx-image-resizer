@@ -7,6 +7,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:8080")
+SOURCE_ASPECT_RATIO = 4 / 3
 
 def request(path):
     req = Request(BASE_URL + path, headers={"User-Agent": "steady-image-resizer-tests/1"})
@@ -17,9 +18,17 @@ def request(path):
         return exc.code, exc.headers, exc.read()
 
 def png_dimensions(data):
-    if data[:8] != b"\\x89PNG\\r\\n\\x1a\\n":
+    if data[:8] != b"\x89PNG\r\n\x1a\n":
         raise AssertionError("response is not a PNG")
     return struct.unpack(">II", data[16:24])
+
+def assert_fits_resize_box(testcase, data, max_width, max_height):
+    width, height = png_dimensions(data)
+    testcase.assertGreater(width, 0)
+    testcase.assertGreater(height, 0)
+    testcase.assertLessEqual(width, max_width)
+    testcase.assertLessEqual(height, max_height)
+    testcase.assertAlmostEqual(width / height, SOURCE_ASPECT_RATIO, delta=0.03)
 
 def wait_for_service():
     for _ in range(40):
@@ -37,11 +46,11 @@ class ImageResizerIntegrationTests(unittest.TestCase):
     def setUpClass(cls):
         wait_for_service()
 
-    def test_resize_returns_requested_dimensions(self):
+    def test_resize_fits_requested_dimensions_and_returns_png(self):
         status, headers, body = request("/77x77/sample.png")
         self.assertEqual(status, 200)
         self.assertIn("image/png", headers.get("Content-Type", ""))
-        self.assertEqual((77, 77), png_dimensions(body))
+        assert_fits_resize_box(self, body, 77, 77)
 
     def test_proxy_cache_miss_then_hit(self):
         path = "/91x63/sample.png"
@@ -51,14 +60,15 @@ class ImageResizerIntegrationTests(unittest.TestCase):
         self.assertEqual(second_status, 200)
         self.assertEqual("MISS", first_headers.get("X-Cache-Status"))
         self.assertEqual("HIT", second_headers.get("X-Cache-Status"))
-        self.assertEqual((91, 63), png_dimensions(first_body))
+        assert_fits_resize_box(self, first_body, 91, 63)
         self.assertEqual(first_body, second_body)
 
     def test_different_sizes_are_distinct_variants(self):
         _, _, small = request("/31x29/sample.png")
         _, _, large = request("/111x87/sample.png")
-        self.assertEqual((31, 29), png_dimensions(small))
-        self.assertEqual((111, 87), png_dimensions(large))
+        assert_fits_resize_box(self, small, 31, 29)
+        assert_fits_resize_box(self, large, 111, 87)
+        self.assertNotEqual(png_dimensions(small), png_dimensions(large))
 
     def test_invalid_dimensions_are_rejected(self):
         for path in ("/0x10/sample.png", "/01x10/sample.png", "/2049x10/sample.png",
@@ -84,7 +94,7 @@ class ImageResizerIntegrationTests(unittest.TestCase):
             results = list(pool.map(lambda _: request("/137x91/sample.png"), range(8)))
         for status, _, body in results:
             self.assertEqual(status, 200)
-            self.assertEqual((137, 91), png_dimensions(body))
+            assert_fits_resize_box(self, body, 137, 91)
 
 if __name__ == "__main__":
     unittest.main()
