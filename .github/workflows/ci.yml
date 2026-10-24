@@ -61,6 +61,7 @@ jobs:
         run: |
           docker build --build-arg NGINX_CONFIG=nginx-direct-tls.conf -t steady-nginx-image-resizer:direct-tls .
           docker build -f demo/Dockerfile -t steady-image-resizer-demo-origin .
+          docker build -f validator/Dockerfile -t steady-image-resizer-validator .
       - name: Test direct-TLS routing, resizing, cache, and hardened runtime
         run: |
           set -eu
@@ -93,8 +94,9 @@ jobs:
             steady-nginx-image-resizer:direct-tls
           cleanup() {
             docker logs direct-tls-smoke 2>/dev/null || true
+            docker logs direct-tls-validator 2>/dev/null || true
             docker logs direct-tls-origin 2>/dev/null || true
-            docker rm -f direct-tls-smoke direct-tls-origin >/dev/null 2>&1 || true
+            docker rm -f direct-tls-smoke direct-tls-validator direct-tls-origin >/dev/null 2>&1 || true
             docker network rm "$network" >/dev/null 2>&1 || true
           }
           trap cleanup EXIT
