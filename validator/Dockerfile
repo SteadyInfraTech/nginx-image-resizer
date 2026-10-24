@@ -7,7 +7,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     MAX_SOURCE_DIMENSION=8192
 
 WORKDIR /app
-COPY validator.py /app/validator.py
+COPY validator/validator.py /app/validator.py
 USER 65532:65532
 EXPOSE 8082
 CMD ["python", "/app/validator.py"]
