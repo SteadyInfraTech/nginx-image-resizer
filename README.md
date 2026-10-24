@@ -51,24 +51,22 @@ The integration suite exercises the real HTTP service and checks that output dim
 
 ## Scaled-out deployment (future option)
 
-The original deployment model can be extended beyond this single-container demo. Public cache hosts face the internet on ports 80/443 and serve cached images directly; only cache misses need to go to the resizer tier. Resizer hosts can be scaled horizontally, with peer resizers as an optional fallback.
+The proposed topology keeps the request path simple: public cache nodes serve hits directly, and only misses go to the resizer tier. The resizer fetches the original image, transforms it, and returns the result to be cached.
 
 ```mermaid
-flowchart TD
-    C["Clients / Internet<br/>HTTP :80 · HTTPS :443"]
-    K["Public cache nodes<br/>Serve cache hits locally"]
-    R["Resizer tier<br/>Fetch original → resize"]
-    O["Fixed image origin"]
-    P["Peer resizer hosts<br/>Optional fallback"]
+flowchart TB
+    A["Clients / Internet<br/>HTTPS :443 · HTTP :80"]
+    B["Public cache nodes<br/>Serve cache hits directly; forward misses"]
+    C["Resizer tier<br/>Fetch original → resize → return result to cache"]
+    D["Fixed image origin"]
 
-    C --> K
-    K -->|"Cache miss"| R
-    R --> O
-    R -. "Optional fallback if local resizer unavailable" .-> P
-    P --> O
+    A --> B --> C --> D
+
+    classDef tier fill:#f4f7fb,stroke:#53677d,color:#172b3a,stroke-width:1.5px;
+    class A,B,C,D tier;
 ```
 
-This is a possible deployment extension, not functionality implemented or tested by the current demo. Multi-host routing needs deliberate health checks, timeouts, TLS/trust boundaries, and cache/failover policies.
+**Possible extension:** multiple resizer hosts with peer fallback and health-aware routing. This is a future deployment option, not functionality implemented or tested by the current demo. Multi-host routing needs deliberate health checks, timeouts, TLS/trust boundaries, and cache/failover policies.
 
 ## Architecture
 
