@@ -11,7 +11,7 @@ services:
       args:
         NGINX_CONFIG: nginx.conf
         NGINX_CACHE_VALIDITY: 1s
-    ports: ["8080:8080"]
+    ports: ["${NGINX_HOST_PORT:-8080}:8080"]
     depends_on: [origin]
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1"]
