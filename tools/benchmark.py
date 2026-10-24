@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import json
+import math
 import statistics
 import time
 import urllib.error
@@ -24,10 +25,11 @@ class Result:
 
 
 def percentile(values: list[float], fraction: float) -> float:
+    """Return a nearest-rank percentile, rounded to two decimal places."""
     if not values:
         return 0.0
     ordered = sorted(values)
-    index = max(0, min(len(ordered) - 1, int((len(ordered) - 1) * fraction + 0.5)))
+    index = max(0, min(len(ordered) - 1, math.ceil(len(ordered) * fraction) - 1))
     return round(ordered[index], 2)
 
 
@@ -41,13 +43,11 @@ def request_one(url: str, timeout: float) -> Result:
             cache_status = response.headers.get("X-Cache-Status", "unreported")
             error = None
     except urllib.error.HTTPError as exc:
-        try:
-            exc.read()
-        finally:
-            status = exc.code
-            cache_status = exc.headers.get("X-Cache-Status", "unreported")
-            error = f"HTTP {exc.code}"
-    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        status = exc.code
+        cache_status = exc.headers.get("X-Cache-Status", "unreported")
+        error = f"HTTP {exc.code}"
+        exc.close()
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as exc:
         status = 0
         cache_status = "unreported"
         error = str(exc)
@@ -70,8 +70,19 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    if args.requests < 1 or args.concurrency < 1 or args.timeout <= 0:
-        parser.error("--requests and --concurrency must be positive; --timeout must be greater than zero")
+    if (
+        args.requests < 1
+        or args.concurrency < 1
+        or not math.isfinite(args.timeout)
+        or args.timeout <= 0
+    ):
+        parser.error("--requests and --concurrency must be positive; --timeout must be finite and greater than zero")
+
+    parsed_base = urllib.parse.urlsplit(args.base_url)
+    if parsed_base.scheme not in ("http", "https") or not parsed_base.netloc:
+        parser.error("--base-url must be an absolute http:// or https:// URL")
+    if parsed_base.query or parsed_base.fragment:
+        parser.error("--base-url must not include a query string or fragment")
 
     base = args.base_url.rstrip("/")
     path = "/" + args.path.lstrip("/")
