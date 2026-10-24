@@ -32,7 +32,7 @@ class BenchmarkUnitTests(unittest.TestCase):
         for timeout in ("nan", "inf", "-inf"):
             with self.subTest(timeout=timeout):
                 result = subprocess.run(
-                    [sys.executable, str(BENCHMARK_PATH), "--timeout", timeout],
+                    [sys.executable, str(BENCHMARK_PATH), f"--timeout={timeout}"],
                     capture_output=True,
                     text=True,
                     check=False,
