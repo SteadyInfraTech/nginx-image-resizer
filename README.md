@@ -60,6 +60,8 @@ docker build --build-arg NGINX_CONFIG=nginx-direct-tls.conf \\
 docker run --rm \
   --network your-private-network \
   --read-only \
+  --memory "${NGINX_MEMORY_LIMIT:?Set NGINX_MEMORY_LIMIT to a measured container memory budget}" \
+  --memory-swap "${NGINX_MEMORY_LIMIT:?Set NGINX_MEMORY_LIMIT to a measured container memory budget}" \
   --cap-drop ALL --cap-add CHOWN --cap-add SETUID --cap-add SETGID --cap-add NET_BIND_SERVICE \
   --security-opt no-new-privileges:true \
   --tmpfs /run/nginx:rw,noexec,nosuid,size=1m,mode=0755 \
