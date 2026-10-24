@@ -26,3 +26,37 @@ jobs:
       - name: Clean up
         if: always()
         run: docker compose down --volumes --remove-orphans
+
+  direct-tls-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Generate ephemeral test certificate
+        run: |
+          mkdir -p "$RUNNER_TEMP/image-resizer-tls"
+          openssl req -x509 -nodes -newkey rsa:2048 -days 1 \
+            -keyout "$RUNNER_TEMP/image-resizer-tls/tls.key" \
+            -out "$RUNNER_TEMP/image-resizer-tls/tls.crt" \
+            -subj "/CN=localhost"
+      - name: Build direct-TLS image
+        run: docker build --build-arg NGINX_CONFIG=nginx-direct-tls.conf -t steady-nginx-image-resizer:direct-tls .
+      - name: Validate direct-TLS configuration
+        run: |
+          docker run --rm --add-host origin:127.0.0.1 \
+            -v "$RUNNER_TEMP/image-resizer-tls:/etc/nginx/tls:ro" \
+            steady-nginx-image-resizer:direct-tls nginx -t
+      - name: Check HTTP redirect and HTTPS health endpoint
+        run: |
+          docker run -d --name direct-tls-smoke --add-host origin:127.0.0.1 \
+            -p 18080:80 -p 18443:443 \
+            -v "$RUNNER_TEMP/image-resizer-tls:/etc/nginx/tls:ro" \
+            steady-nginx-image-resizer:direct-tls
+          trap 'docker logs direct-tls-smoke; docker rm -f direct-tls-smoke >/dev/null 2>&1 || true' EXIT
+          for attempt in $(seq 1 20); do
+            if curl -sS -o /dev/null http://127.0.0.1:18080/healthz; then break; fi
+            sleep 1
+          done
+          test "$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/77x77/sample.png)" = "301"
+          test "$(curl -ksS -o /dev/null -w '%{http_code}' https://127.0.0.1:18443/healthz)" = "200"
