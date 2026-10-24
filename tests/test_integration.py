@@ -23,8 +23,11 @@ def set_stale_sample_origin_status(status):
             raise AssertionError(f"unexpected origin control response: {response.status}")
 
 
-def request(path):
-    req = Request(BASE_URL + path, headers={"User-Agent": "steady-image-resizer-tests/1"})
+def request(path, headers=None):
+    request_headers = {"User-Agent": "steady-image-resizer-tests/1"}
+    if headers:
+        request_headers.update(headers)
+    req = Request(BASE_URL + path, headers=request_headers)
     try:
         with urlopen(req, timeout=10) as response:
             return response.status, response.headers, response.read()
@@ -143,6 +146,28 @@ class ImageResizerIntegrationTests(unittest.TestCase):
         assert_fits_resize_box(self, first_body, 77, 77)
         assert_fits_resize_box(self, second_body, 77, 77)
         self.assertNotEqual(first_body, second_body)
+
+    def test_client_host_header_cannot_select_or_poison_origin_content(self):
+        # The origin's canonical response for this fixture is version 2.
+        expected_status, _, expected_body = request(
+            "/77x77/sample.png?version=2"
+        )
+        self.assertEqual(200, expected_status)
+
+        path = "/77x77/host-sensitive.png?case=fixed-origin-host"
+        attacker_status, attacker_headers, attacker_body = request(
+            path, headers={"Host": "attacker.example"}
+        )
+        normal_status, normal_headers, normal_body = request(path)
+        self.assertEqual(200, attacker_status)
+        self.assertEqual(200, normal_status)
+        self.assertEqual("MISS", attacker_headers.get("X-Cache-Status"))
+        self.assertEqual("HIT", normal_headers.get("X-Cache-Status"))
+        # A client-supplied Host must not select different origin content
+        # under a cache key that intentionally does not include that header.
+        self.assertEqual(expected_body, attacker_body)
+        self.assertEqual(attacker_body, normal_body)
+        assert_fits_resize_box(self, attacker_body, 77, 77)
 
     def test_different_sizes_are_distinct_variants(self):
         _, _, small = request("/31x29/sample.png")

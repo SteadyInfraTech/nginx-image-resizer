@@ -69,6 +69,14 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+        elif parsed.path == "/host-sensitive.png":
+            # Regression fixture: an untrusted Host must not select origin content.
+            body = PNG if self.headers.get("Host") == "attacker.example" else PNG_VERSION_2
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
         elif parsed.path == "/sample.png":
             body = PNG_VERSION_2 if query.get("version") == ["2"] else PNG
             self.send_response(200)
