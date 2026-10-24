@@ -17,6 +17,10 @@ The cache must sit in front of the transformed response if we want cache hits to
 
 Only port 8080 is published by Docker Compose. Port 8082 binds to loopback inside the NGINX container and is not exposed to other containers or the host.
 
+## Possible multi-host deployment
+
+For a larger deployment, public cache nodes can listen on ports 80/443 and serve cache hits locally, forwarding misses to a resizer tier. Multiple resizer hosts could be used for capacity and optional peer fallback. This requires explicit upstream health checks, failover/timeouts, TLS and trust boundaries, and a cache policy; none of that multi-host behavior is implemented or validated in this demo.
+
 ## Cache key
 
 The key includes scheme, upstream host, and $uri. The URI contains dimensions and source path, so variants do not collide. If behavior later depends on query parameters, negotiated formats, authorization, or headers, update and test the cache key before enabling those features.
