@@ -53,7 +53,7 @@ docker run --rm \
 
 The mounted directory must contain `tls.crt` and `tls.key`. The certificate should cover the public hostname. Keep private keys out of the image and manage renewal through your certificate-management process. Plain HTTP requests redirect to HTTPS; `/healthz` remains available on port 80 for health checks. The NGINX master binds low ports, while worker processes run as the `nginx` user. Do not set a container-wide `USER nginx` without separately validating low-port binding, PID creation, and cache/temp directory permissions.
 
-This configuration expects the fixed origin to be reachable as `origin:8081`, just like the default configuration. In production, connect it to the intended private origin network and avoid publishing the origin or loopback transformer.
+Replace `your-private-network` with an existing Docker network, and attach the origin service to that same network with the network alias `origin` on port `8081`. The configuration expects the fixed origin to be reachable as `origin:8081`, just like the default configuration. Avoid publishing the origin or loopback transformer.
 
 ## Request contract
 
