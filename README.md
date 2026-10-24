@@ -49,6 +49,27 @@ The integration suite exercises the real HTTP service and checks that output dim
 - The edge cache is local to one instance; replicas do not share cache contents automatically.
 - This is not a full image CDN or media platform. Advanced codecs, cropping, focal points, authorization, purge APIs, and global delivery are out of scope.
 
+## Scaled-out deployment (future option)
+
+The original deployment model can be extended beyond this single-container demo. Public cache hosts face the internet on ports 80/443 and serve cached images directly; only cache misses need to go to the resizer tier. Resizer hosts can be scaled horizontally, with peer resizers as an optional fallback.
+
+```mermaid
+flowchart TD
+    C["Clients / Internet<br/>HTTP :80 · HTTPS :443"]
+    K["Public cache nodes<br/>Serve cache hits locally"]
+    R["Resizer tier<br/>Fetch original → resize"]
+    O["Fixed image origin"]
+    P["Peer resizer hosts<br/>Optional fallback"]
+
+    C --> K
+    K -->|"Cache miss"| R
+    R --> O
+    R -. "Optional fallback if local resizer unavailable" .-> P
+    P --> O
+```
+
+This is a possible deployment extension, not functionality implemented or tested by the current demo. Multi-host routing needs deliberate health checks, timeouts, TLS/trust boundaries, and cache/failover policies.
+
 ## Architecture
 
     client
