@@ -60,6 +60,8 @@ docker build --build-arg NGINX_CONFIG=nginx-direct-tls.conf \\
 docker run --rm \
   --network your-private-network \
   --read-only \
+  --memory "${NGINX_MEMORY_LIMIT:?Set NGINX_MEMORY_LIMIT to a measured container memory budget}" \
+  --memory-swap "${NGINX_MEMORY_LIMIT:?Set NGINX_MEMORY_LIMIT to a measured container memory budget}" \
   --cap-drop ALL --cap-add CHOWN --cap-add SETUID --cap-add SETGID --cap-add NET_BIND_SERVICE \
   --security-opt no-new-privileges:true \
   --tmpfs /run/nginx:rw,noexec,nosuid,size=1m,mode=0755 \
@@ -114,7 +116,7 @@ The integration suite checks resize dimensions and aspect ratio, cache MISS then
 
 - The image-filter module is separate and depends on GD; package availability and module paths vary by distribution.
 - The demo tests PNG only and makes no claims about WebP, AVIF, animated images, or metadata/profile preservation.
-- Transformations consume CPU and memory. The 8 MiB image-filter buffer and 16-request concurrency cap reduce exposure but are not a complete resource budget; benchmark and tune both against deployment-specific CPU and memory limits.
+- Transformations consume CPU and memory. The 8 MiB image-filter buffer caps encoded response bytes, **not decoded pixel allocation**; a highly compressed image with huge dimensions can still demand substantial memory during decoding. NGINX's image-filter module does not provide a source-pixel limit. Trust the origin or validate image dimensions/pixel count with a decoder designed for untrusted input before it reaches NGINX. Set an OS/container memory limit (the direct-TLS example requires `NGINX_MEMORY_LIMIT`), tune concurrency against measurements, and understand that an OOM kill can interrupt requests. These controls contain risk but do not replace decoder-level pixel limits.
 - Arbitrary sizes can fragment the cache; dimension bounds reduce but do not eliminate this.
 - Updating an original at the same path does not automatically invalidate cached variants. Use a versioned URL/query or wait for expiry; there is no purge API.
 - CI uses a one-second TTL override for stale-on-503 testing; the default image retains a ten-minute TTL. Timeout behavior, sustained origin failure, high-load behavior, TLS renewal, and load-balancer integration need deployment-specific testing.
