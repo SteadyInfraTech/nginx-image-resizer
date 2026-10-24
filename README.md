@@ -31,6 +31,12 @@ docker compose down
 
 The demo origin serves synthetic PNG fixtures; no external image host is needed.
 
+## Runtime hardening
+
+The Compose NGINX service runs with a read-only container root filesystem, drops all Linux capabilities, enables `no-new-privileges`, and mounts bounded writable tmpfs filesystems for the NGINX PID, cache, and temporary files. The cache is ephemeral and limited by the 96 MiB cache tmpfs; the NGINX cache itself is configured for a 64 MiB maximum. The tmpfs is intentionally not persistent across container recreation.
+
+These are defense-in-depth defaults, not a substitute for host-level resource limits, network policy, image updates, or deployment-specific testing. CPU and memory limits are not guessed here; choose them from benchmark measurements.
+
 ## Deployment
 
 ### Behind a load balancer or reverse proxy
@@ -51,12 +57,19 @@ docker network create your-private-network
 docker build --build-arg NGINX_CONFIG=nginx-direct-tls.conf -t steady-nginx-image-resizer:direct-tls .
 docker run --rm \
   --network your-private-network \
+  --read-only \
+  --cap-drop ALL --cap-add CHOWN --cap-add SETUID --cap-add SETGID --cap-add NET_BIND_SERVICE \
+  --security-opt no-new-privileges:true \
+  --tmpfs /run/nginx:rw,noexec,nosuid,size=1m,mode=0755 \
+  --tmpfs /var/lib/nginx/tmp:rw,noexec,nosuid,size=16m,mode=1777 \
+  --tmpfs /var/cache/nginx:rw,noexec,nosuid,size=96m,mode=1777 \
+  --tmpfs /tmp:rw,noexec,nosuid,size=16m,mode=1777 \
   -p 80:80 -p 443:443 \
   -v "$PWD/tls:/etc/nginx/tls:ro" \
   steady-nginx-image-resizer:direct-tls
 ```
 
-The mounted directory must contain `tls.crt` and `tls.key`. The certificate should cover the public hostname. Keep private keys out of the image and manage renewal through your certificate-management process. Plain HTTP requests redirect to HTTPS; `/healthz` remains available on port 80 for health checks. The NGINX master binds low ports, while worker processes run as the `nginx` user. Do not set a container-wide `USER nginx` without separately validating low-port binding, PID creation, and cache/temp directory permissions.
+The mounted directory must contain `tls.crt` and `tls.key`. The certificate should cover the public hostname. Ensure the key is readable by the container's NGINX master through normal file ownership and permissions; with the hardened capability set, do not rely on `DAC_OVERRIDE` to read a host-owned key. Keep private keys out of the image and manage renewal through your certificate-management process. Plain HTTP requests redirect to HTTPS; `/healthz` remains available on port 80 for health checks. The NGINX master binds low ports, while worker processes run as the `nginx` user. Only `CHOWN` (for NGINX cache-directory ownership), `SETUID`/`SETGID` (to start workers as the configured `nginx` user), and `NET_BIND_SERVICE` (for ports 80 and 443) are retained; all other capabilities are dropped. Do not set a container-wide `USER nginx` without separately validating low-port binding, PID creation, and cache/temp directory permissions.
 
 Use an existing Docker network in place of `your-private-network` (or create it as shown above). Attach the origin container/service to that same network with the network alias `origin` and port `8081`; the resizer must join the network as well so `origin:8081` resolves from inside its container. If the origin is managed by Compose, configure the shared network and alias there rather than creating a second origin container. Avoid publishing the origin or loopback transformer.
 
@@ -92,7 +105,7 @@ Fixed image origin :8081
 
 ## CI coverage
 
-The integration suite checks resize dimensions and aspect ratio, cache MISS then HIT, cache bypass without storage, versioned cache keys, invalid dimensions, path traversal attempts, missing origin objects, upstream 503 preservation, corrupt and non-image payloads, oversized originals, concurrent same-key and distinct transformations, overload rejection when concurrent image requests exceed the configured cap, and stale-cache fallback when the origin returns 503 after expiry.
+The integration suite checks resize dimensions and aspect ratio, cache MISS then HIT, cache bypass without storage, versioned cache keys, invalid dimensions, path traversal attempts, missing origin objects, upstream 503 preservation, corrupt and non-image payloads, oversized originals, concurrent same-key and distinct transformations, overload rejection when concurrent image requests exceed the configured cap, and stale-cache fallback when the origin returns 503 after expiry. CI also exercises direct-TLS resizing and cache behavior under the hardened container runtime flags.
 
 ## Limitations
 
