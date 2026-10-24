@@ -64,6 +64,7 @@ Use an existing Docker network in place of `your-private-network` (or create it 
 
 - Request format: `/{width}x{height}/{origin-relative-path}`.
 - Width and height are bounded to 1–2048.
+- At most 16 image requests per instance are processed concurrently by default; excess requests receive HTTP 503. Tune at build time with `--build-arg NGINX_MAX_CONCURRENT_IMAGE_REQUESTS=...` based on measured capacity.
 - The upstream origin is fixed by configuration; clients cannot provide an arbitrary origin URL.
 - Cache keys include the URI and query string, so requested sizes and versioned query variants are cached separately.
 - Add `?bypass_cache=1` to skip cache lookup and storage. Values `1`, `true`, and `yes` are recognized. The response includes `X-Cache-Status: BYPASS`.
@@ -91,13 +92,13 @@ Fixed image origin :8081
 
 ## CI coverage
 
-The integration suite checks resize dimensions and aspect ratio, cache MISS then HIT, cache bypass without storage, versioned cache keys, invalid dimensions, path traversal attempts, missing origin objects, upstream 503 preservation, corrupt and non-image payloads, oversized originals, concurrent same-key and distinct transformations, and stale-cache fallback when the origin returns 503 after expiry.
+The integration suite checks resize dimensions and aspect ratio, cache MISS then HIT, cache bypass without storage, versioned cache keys, invalid dimensions, path traversal attempts, missing origin objects, upstream 503 preservation, corrupt and non-image payloads, oversized originals, concurrent same-key and distinct transformations, overload rejection when concurrent image requests exceed the configured cap, and stale-cache fallback when the origin returns 503 after expiry.
 
 ## Limitations
 
 - The image-filter module is separate and depends on GD; package availability and module paths vary by distribution.
 - The demo tests PNG only and makes no claims about WebP, AVIF, animated images, or metadata/profile preservation.
-- Transformations consume CPU and memory. The 8 MiB image-filter buffer is not a complete resource budget.
+- Transformations consume CPU and memory. The 8 MiB image-filter buffer and 16-request concurrency cap reduce exposure but are not a complete resource budget; benchmark and tune both against deployment-specific CPU and memory limits.
 - Arbitrary sizes can fragment the cache; dimension bounds reduce but do not eliminate this.
 - Updating an original at the same path does not automatically invalidate cached variants. Use a versioned URL/query or wait for expiry; there is no purge API.
 - CI uses a one-second TTL override for stale-on-503 testing; the default image retains a ten-minute TTL. Timeout behavior, sustained origin failure, high-load behavior, TLS renewal, and load-balancer integration need deployment-specific testing.
