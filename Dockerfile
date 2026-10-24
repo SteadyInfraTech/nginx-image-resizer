@@ -17,6 +17,7 @@ RUN set -eu; \
     chmod 755 /var/lib/nginx /var/lib/nginx/logs /var/lib/nginx/tmp; \
     ln -sf /dev/stderr /var/lib/nginx/logs/error.log; \
     chown -R nginx:nginx /var/cache/nginx; \
+    test -r /usr/lib/nginx/modules/ngx_http_image_filter_module.so; \
     if [ "${NGINX_CONFIG}" = "nginx-direct-tls.conf" ]; then \
       case "${NGINX_PUBLIC_HOST}" in ""|*[!A-Za-z0-9.-]*|.*|*.|*..*) echo "NGINX_PUBLIC_HOST must be a DNS hostname" >&2; exit 1 ;; esac; \
       sed -i "s/server_name _;/server_name ${NGINX_PUBLIC_HOST};/g" /etc/nginx/nginx.conf; \
