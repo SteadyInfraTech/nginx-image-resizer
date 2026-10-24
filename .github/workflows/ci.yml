@@ -51,6 +51,15 @@ jobs:
           docker network create "$network"
           docker run -d --name direct-tls-origin --network "$network" \
             --network-alias origin steady-image-resizer-demo-origin
+          origin_ready=0
+          for attempt in $(seq 1 20); do
+            if docker exec direct-tls-origin python -c 'from urllib.request import urlopen; r=urlopen("http://127.0.0.1:8081/sample.png", timeout=1); assert r.status == 200 and r.headers.get_content_type() == "image/png"; r.read(8)' ; then
+              origin_ready=1
+              break
+            fi
+            sleep 1
+          done
+          test "$origin_ready" = "1"
           docker run --rm --network "$network" \
             -v "$RUNNER_TEMP/image-resizer-tls:/etc/nginx/tls:ro" \
             steady-nginx-image-resizer:direct-tls nginx -t
@@ -60,6 +69,7 @@ jobs:
             steady-nginx-image-resizer:direct-tls
           cleanup() {
             docker logs direct-tls-smoke 2>/dev/null || true
+            docker logs direct-tls-origin 2>/dev/null || true
             docker rm -f direct-tls-smoke direct-tls-origin >/dev/null 2>&1 || true
             docker network rm "$network" >/dev/null 2>&1 || true
           }
