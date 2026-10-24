@@ -92,7 +92,7 @@ class ImageResizerIntegrationTests(unittest.TestCase):
 
             # The Compose test image overrides the cache TTL to 1s; the
             # default production image keeps the 10m setting from nginx.conf.
-            time.sleep(1.2)
+            time.sleep(3.0)
             set_stale_sample_origin_status(503)
 
             stale_status, stale_headers, stale_body = request(path)
