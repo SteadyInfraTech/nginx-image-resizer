@@ -7,7 +7,20 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:8080")
+ORIGIN_CONTROL_URL = os.environ.get("ORIGIN_CONTROL_URL", "http://127.0.0.1:8081")
 SOURCE_ASPECT_RATIO = 4 / 3
+
+
+def set_stale_sample_origin_status(status):
+    req = Request(
+        ORIGIN_CONTROL_URL + "/__test__/stale-sample-status",
+        data=str(status).encode("ascii"),
+        method="POST",
+        headers={"Content-Type": "text/plain"},
+    )
+    with urlopen(req, timeout=5) as response:
+        if response.status != 204:
+            raise AssertionError(f"unexpected origin control response: {response.status}")
 
 
 def request(path):
@@ -67,6 +80,27 @@ class ImageResizerIntegrationTests(unittest.TestCase):
         self.assertEqual("HIT", second_headers.get("X-Cache-Status"))
         assert_fits_resize_box(self, first_body, 91, 63)
         self.assertEqual(first_body, second_body)
+
+    def test_stale_cached_image_is_served_when_origin_returns_503(self):
+        path = "/77x77/stale-sample.png?case=stale-on-503"
+        set_stale_sample_origin_status(200)
+        try:
+            first_status, first_headers, first_body = request(path)
+            self.assertEqual(200, first_status)
+            self.assertEqual("MISS", first_headers.get("X-Cache-Status"))
+            assert_fits_resize_box(self, first_body, 77, 77)
+
+            # The Compose test image overrides the cache TTL to 1s; the
+            # default production image keeps the 10m setting from nginx.conf.
+            time.sleep(3.0)
+            set_stale_sample_origin_status(503)
+
+            stale_status, stale_headers, stale_body = request(path)
+            self.assertEqual(200, stale_status)
+            self.assertEqual("STALE", stale_headers.get("X-Cache-Status"))
+            self.assertEqual(first_body, stale_body)
+        finally:
+            set_stale_sample_origin_status(200)
 
     def test_bypass_cache_argument_skips_lookup_and_storage(self):
         bypass_path = "/77x77/sample.png?version=cache-bypass&bypass_cache=1"
