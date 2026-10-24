@@ -90,8 +90,8 @@ class ImageResizerIntegrationTests(unittest.TestCase):
             self.assertEqual("MISS", first_headers.get("X-Cache-Status"))
             assert_fits_resize_box(self, first_body, 77, 77)
 
-            # The fixture's Cache-Control max-age=1 expires this exact cache key
-            # quickly without changing the production cache TTL.
+            # The Compose test image overrides the cache TTL to 1s; the
+            # default production image keeps the 10m setting from nginx.conf.
             time.sleep(1.2)
             set_stale_sample_origin_status(503)
 
