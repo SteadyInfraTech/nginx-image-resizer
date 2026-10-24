@@ -74,6 +74,10 @@ jobs:
             echo "invalid cache TTL build argument was accepted" >&2
             exit 1
           fi
+          if docker build --build-arg NGINX_ORIGIN_UPSTREAM="origin:8081; return 200" -t invalid-origin-upstream-test .; then
+            echo "invalid origin upstream build argument was accepted" >&2
+            exit 1
+          fi
       - name: Build direct-TLS and demo-origin images
         run: |
           docker build --build-arg NGINX_CONFIG=nginx-direct-tls.conf -t steady-nginx-image-resizer:direct-tls .
