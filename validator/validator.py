@@ -33,10 +33,63 @@ def dimensions(data: bytes) -> tuple[int, int, str]:
         return width, height, "image/png"
 
     if data.startswith((b"GIF87a", b"GIF89a")):
-        if len(data) < 10:
+        if len(data) < 14:
             raise InvalidImage("invalid GIF header")
         width, height = struct.unpack("<HH", data[6:10])
-        return width, height, "image/gif"
+        max_width, max_height = width, height
+        packed = data[10]
+        pos = 13
+        if packed & 0x80:  # Global color table.
+            pos += 3 * (1 << ((packed & 0x07) + 1))
+        saw_trailer = False
+        while pos < len(data):
+            block = data[pos]
+            pos += 1
+            if block == 0x3B:  # Trailer.
+                saw_trailer = True
+                break
+            if block == 0x21:  # Extension: skip bounded data sub-blocks.
+                if pos >= len(data):
+                    raise InvalidImage("truncated GIF extension")
+                pos += 1  # Extension label.
+                while True:
+                    if pos >= len(data):
+                        raise InvalidImage("truncated GIF extension data")
+                    size = data[pos]
+                    pos += 1
+                    if size == 0:
+                        break
+                    if pos + size > len(data):
+                        raise InvalidImage("truncated GIF extension block")
+                    pos += size
+                continue
+            if block != 0x2C:  # Image descriptor.
+                raise InvalidImage("invalid GIF block")
+            if pos + 9 > len(data):
+                raise InvalidImage("truncated GIF image descriptor")
+            frame_width, frame_height = struct.unpack("<HH", data[pos + 4:pos + 8])
+            frame_packed = data[pos + 8]
+            max_width = max(max_width, frame_width)
+            max_height = max(max_height, frame_height)
+            pos += 9
+            if frame_packed & 0x80:  # Local color table.
+                pos += 3 * (1 << ((frame_packed & 0x07) + 1))
+            if pos >= len(data):
+                raise InvalidImage("missing GIF LZW code size")
+            pos += 1  # LZW minimum code size.
+            while True:
+                if pos >= len(data):
+                    raise InvalidImage("truncated GIF image data")
+                size = data[pos]
+                pos += 1
+                if size == 0:
+                    break
+                if pos + size > len(data):
+                    raise InvalidImage("truncated GIF image data block")
+                pos += size
+        if not saw_trailer:
+            raise InvalidImage("GIF trailer not found")
+        return max_width, max_height, "image/gif"
 
     if data.startswith(b"\xff\xd8"):
         pos = 2
