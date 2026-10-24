@@ -41,7 +41,19 @@ The demo's host port can be changed with `NGINX_HOST_PORT`. For example, set it 
 
 ### Direct HTTPS
 
-The default configuration does not terminate TLS. For direct HTTPS, use a dedicated NGINX configuration with listeners on ports `80` and `443`, redirect HTTP to HTTPS, and mount certificates and keys at runtime. Do not bake private keys into the image. Keep certificate renewal in your deployment's certificate-management process. The NGINX master binds low ports; worker processes run as the `nginx` user. A container-wide non-root setting needs separate validation for port binding, PID creation, and cache/temp directory permissions.
+A separate configuration is provided for deployments where this container terminates TLS itself. Build with `nginx-direct-tls.conf`, publish ports `80` and `443`, and mount a certificate/key pair at runtime:
+
+```sh
+docker build --build-arg NGINX_CONFIG=nginx-direct-tls.conf -t steady-nginx-image-resizer:direct-tls .
+docker run --rm \
+  -p 80:80 -p 443:443 \
+  -v "$PWD/tls:/etc/nginx/tls:ro" \
+  steady-nginx-image-resizer:direct-tls
+```
+
+The mounted directory must contain `tls.crt` and `tls.key`. The certificate should cover the public hostname. Keep private keys out of the image and manage renewal through your certificate-management process. Plain HTTP requests redirect to HTTPS; `/healthz` remains available on port 80 for health checks. The NGINX master binds low ports, while worker processes run as the `nginx` user. Do not set a container-wide `USER nginx` without separately validating low-port binding, PID creation, and cache/temp directory permissions.
+
+This configuration expects the fixed origin to be reachable as `origin:8081`, just like the default configuration. In production, connect it to the intended private origin network and avoid publishing the origin or loopback transformer.
 
 ## Request contract
 
