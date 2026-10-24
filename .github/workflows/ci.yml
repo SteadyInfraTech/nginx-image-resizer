@@ -42,6 +42,11 @@ jobs:
             -keyout "$RUNNER_TEMP/image-resizer-tls/tls.key" \
             -out "$RUNNER_TEMP/image-resizer-tls/tls.crt" \
             -subj "/CN=localhost"
+          # The hardened container drops DAC_OVERRIDE; make the ephemeral key
+          # readable by container root through normal ownership, not extra caps.
+          sudo chown root:root "$RUNNER_TEMP/image-resizer-tls/tls.key" "$RUNNER_TEMP/image-resizer-tls/tls.crt"
+          chmod 600 "$RUNNER_TEMP/image-resizer-tls/tls.key"
+          chmod 644 "$RUNNER_TEMP/image-resizer-tls/tls.crt"
       - name: Build direct-TLS and demo-origin images
         run: |
           docker build --build-arg NGINX_CONFIG=nginx-direct-tls.conf -t steady-nginx-image-resizer:direct-tls .
