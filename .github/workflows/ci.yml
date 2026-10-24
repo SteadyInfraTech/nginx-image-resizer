@@ -78,6 +78,15 @@ jobs:
             sleep 1
           done
           test "$origin_ready" = "1"
+          validator_ready=0
+          for attempt in $(seq 1 20); do
+            if docker exec direct-tls-validator python -c 'from urllib.request import urlopen; r=urlopen("http://127.0.0.1:8082/sample.png", timeout=1); assert r.status == 200 and r.headers.get_content_type() == "image/png"; r.read(8)' ; then
+              validator_ready=1
+              break
+            fi
+            sleep 1
+          done
+          test "$validator_ready" = "1"
           docker run --rm --network "$network" \
             -v "$RUNNER_TEMP/image-resizer-tls:/etc/nginx/tls:ro" \
             steady-nginx-image-resizer:direct-tls nginx -t
