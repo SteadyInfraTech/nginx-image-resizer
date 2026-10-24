@@ -17,11 +17,12 @@ services:
     # space only for its PID, cache, and temporary files.
     read_only: true
     cap_drop: [ALL]
-    cap_add: [SETUID, SETGID]
+    cap_add: [CHOWN, SETUID, SETGID]
     security_opt:
       - no-new-privileges:true
     tmpfs:
       - /run/nginx:rw,noexec,nosuid,size=1m,mode=0755
+      - /var/lib/nginx/logs:rw,noexec,nosuid,size=1m,mode=1777
       - /var/cache/nginx:rw,noexec,nosuid,size=96m,mode=1777
       - /tmp:rw,noexec,nosuid,size=16m,mode=1777
     healthcheck:
