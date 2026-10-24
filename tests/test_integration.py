@@ -190,6 +190,19 @@ class ImageResizerIntegrationTests(unittest.TestCase):
         self.assertEqual(1, cache_statuses.count("MISS"), cache_statuses)
         self.assertEqual(7, cache_statuses.count("HIT"), cache_statuses)
 
+    def test_excess_concurrent_image_requests_are_rejected(self):
+        # The configured per-instance limit is 16. Slow, distinct cache keys
+        # keep requests in flight long enough to verify overload behavior.
+        paths = [f"/77x77/slow.png?request={index}" for index in range(24)]
+        with ThreadPoolExecutor(max_workers=24) as pool:
+            results = list(pool.map(request, paths))
+
+        statuses = [status for status, _, _ in results]
+        self.assertGreaterEqual(statuses.count(200), 1, statuses)
+        self.assertGreaterEqual(statuses.count(503), 1, statuses)
+        self.assertEqual(24, len(statuses))
+        self.assertTrue(set(statuses).issubset({200, 503}), statuses)
+
     def test_concurrent_distinct_transformations_complete_successfully(self):
         paths = [f"/{width}x{height}/sample.png"
                  for width, height in ((71, 53), (73, 55), (79, 59), (83, 61),
