@@ -2,6 +2,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 import struct
 import threading
+import time
 import zlib
 
 
@@ -53,6 +54,15 @@ class Handler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(body)
                 return
+            body = PNG
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif parsed.path == "/slow.png":
+            # Deterministic slow fixture for exercising the NGINX concurrency cap.
+            time.sleep(1.0)
             body = PNG
             self.send_response(200)
             self.send_header("Content-Type", "image/png")
