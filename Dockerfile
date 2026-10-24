@@ -10,5 +10,5 @@ RUN apk add --no-cache nginx nginx-mod-http-image-filter ca-certificates \
     && chown -R nginx:nginx /var/cache/nginx \
     && sed -i "s/proxy_cache_valid 200 10m;/proxy_cache_valid 200 ${NGINX_CACHE_VALIDITY};/" /etc/nginx/nginx.conf
 
-EXPOSE 8080
+EXPOSE 80 443 8080
 CMD ["nginx", "-g", "daemon off;"]
