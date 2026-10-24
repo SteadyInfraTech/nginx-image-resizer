@@ -97,6 +97,12 @@ jobs:
           test "$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/healthz)" = "200"
           test "$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/77x77/sample.png)" = "301"
           test "$(curl -ksS -o /dev/null -w '%{http_code}' https://127.0.0.1:18443/healthz)" = "200"
+          # Keep input validation and traversal defenses covered for the
+          # separate direct-TLS configuration, not only the default HTTP one.
+          test "$(curl -ksS -o /dev/null -w '%{http_code}' https://127.0.0.1:18443/0x10/sample.png)" = "400"
+          test "$(curl -ksS -o /dev/null -w '%{http_code}' https://127.0.0.1:18443/2049x10/sample.png)" = "400"
+          traversal_status="$(curl --path-as-is -ksS -o /dev/null -w '%{http_code}' https://127.0.0.1:18443/77x77/../sample.png)"
+          case "$traversal_status" in 400|404) ;; *) echo "unexpected traversal status: $traversal_status" >&2; exit 1 ;; esac
           curl -ksS -D "$RUNNER_TEMP/first-headers.txt" -o "$RUNNER_TEMP/resized.png" \
             https://127.0.0.1:18443/77x77/sample.png
           grep -qi '^X-Cache-Status: MISS' "$RUNNER_TEMP/first-headers.txt"
