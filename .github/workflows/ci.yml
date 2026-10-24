@@ -16,8 +16,10 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v4
-      - name: Validate Compose configuration
-        run: docker compose config --quiet
+      - name: Validate Compose configurations
+        run: |
+          docker compose config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.validated.yml config --quiet
       - name: Check benchmark script syntax
         run: python3 -m py_compile tools/benchmark.py
       - name: Build and run integration tests
@@ -28,6 +30,21 @@ jobs:
       - name: Clean up
         if: always()
         run: docker compose down --volumes --remove-orphans
+
+  validated-input-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Build and run optional validated-origin integration suite
+        run: docker compose -f docker-compose.yml -f docker-compose.validated.yml up --build --abort-on-container-exit --exit-code-from tests
+      - name: Show logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.yml -f docker-compose.validated.yml logs --no-color
+      - name: Clean up
+        if: always()
+        run: docker compose -f docker-compose.yml -f docker-compose.validated.yml down --volumes --remove-orphans
 
   direct-tls-smoke:
     runs-on: ubuntu-latest
@@ -61,7 +78,6 @@ jobs:
         run: |
           docker build --build-arg NGINX_CONFIG=nginx-direct-tls.conf -t steady-nginx-image-resizer:direct-tls .
           docker build -f demo/Dockerfile -t steady-image-resizer-demo-origin .
-          docker build -f validator/Dockerfile -t steady-image-resizer-validator .
       - name: Test direct-TLS routing, resizing, cache, and hardened runtime
         run: |
           set -eu
@@ -69,9 +85,6 @@ jobs:
           docker network create "$network"
           docker run -d --name direct-tls-origin --network "$network" \
             --network-alias origin steady-image-resizer-demo-origin
-          docker run -d --name direct-tls-validator --network "$network" \
-            --network-alias validator -e ORIGIN_URL=http://origin:8081 \
-            steady-image-resizer-validator
           origin_ready=0
           for attempt in $(seq 1 20); do
             if docker exec direct-tls-origin python -c 'from urllib.request import urlopen; r=urlopen("http://127.0.0.1:8081/sample.png", timeout=1); assert r.status == 200 and r.headers.get_content_type() == "image/png"; r.read(8)' ; then
@@ -81,15 +94,6 @@ jobs:
             sleep 1
           done
           test "$origin_ready" = "1"
-          validator_ready=0
-          for attempt in $(seq 1 20); do
-            if docker exec direct-tls-validator python -c 'from urllib.request import urlopen; r=urlopen("http://127.0.0.1:8082/sample.png", timeout=1); assert r.status == 200 and r.headers.get_content_type() == "image/png"; r.read(8)' ; then
-              validator_ready=1
-              break
-            fi
-            sleep 1
-          done
-          test "$validator_ready" = "1"
           docker run --rm --network "$network" \
             -v "$RUNNER_TEMP/image-resizer-tls:/etc/nginx/tls:ro" \
             steady-nginx-image-resizer:direct-tls nginx -t
@@ -106,9 +110,8 @@ jobs:
             steady-nginx-image-resizer:direct-tls
           cleanup() {
             docker logs direct-tls-smoke 2>/dev/null || true
-            docker logs direct-tls-validator 2>/dev/null || true
             docker logs direct-tls-origin 2>/dev/null || true
-            docker rm -f direct-tls-smoke direct-tls-validator direct-tls-origin >/dev/null 2>&1 || true
+            docker rm -f direct-tls-smoke direct-tls-origin >/dev/null 2>&1 || true
             docker network rm "$network" >/dev/null 2>&1 || true
           }
           trap cleanup EXIT
