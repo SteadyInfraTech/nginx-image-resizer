@@ -40,23 +40,44 @@ jobs:
             -keyout "$RUNNER_TEMP/image-resizer-tls/tls.key" \
             -out "$RUNNER_TEMP/image-resizer-tls/tls.crt" \
             -subj "/CN=localhost"
-      - name: Build direct-TLS image
-        run: docker build --build-arg NGINX_CONFIG=nginx-direct-tls.conf -t steady-nginx-image-resizer:direct-tls .
-      - name: Validate direct-TLS configuration
+      - name: Build direct-TLS and demo-origin images
         run: |
-          docker run --rm --add-host origin:127.0.0.1 \
+          docker build --build-arg NGINX_CONFIG=nginx-direct-tls.conf -t steady-nginx-image-resizer:direct-tls .
+          docker build -f demo/Dockerfile -t steady-image-resizer-demo-origin .
+      - name: Test direct-TLS routing, resizing, and cache
+        run: |
+          set -eu
+          network=direct-tls-smoke-net
+          docker network create "$network"
+          docker run -d --name direct-tls-origin --network "$network" \
+            --network-alias origin steady-image-resizer-demo-origin
+          docker run --rm --network "$network" \
             -v "$RUNNER_TEMP/image-resizer-tls:/etc/nginx/tls:ro" \
             steady-nginx-image-resizer:direct-tls nginx -t
-      - name: Check HTTP redirect and HTTPS health endpoint
-        run: |
-          docker run -d --name direct-tls-smoke --add-host origin:127.0.0.1 \
+          docker run -d --name direct-tls-smoke --network "$network" \
             -p 18080:80 -p 18443:443 \
             -v "$RUNNER_TEMP/image-resizer-tls:/etc/nginx/tls:ro" \
             steady-nginx-image-resizer:direct-tls
-          trap 'docker logs direct-tls-smoke; docker rm -f direct-tls-smoke >/dev/null 2>&1 || true' EXIT
+          cleanup() {
+            docker logs direct-tls-smoke 2>/dev/null || true
+            docker rm -f direct-tls-smoke direct-tls-origin >/dev/null 2>&1 || true
+            docker network rm "$network" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          ready=0
           for attempt in $(seq 1 20); do
-            if curl -sS -o /dev/null http://127.0.0.1:18080/healthz; then break; fi
+            if curl -ksS -o /dev/null https://127.0.0.1:18443/healthz; then ready=1; break; fi
             sleep 1
           done
+          test "$ready" = "1"
+          test "$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/healthz)" = "200"
           test "$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/77x77/sample.png)" = "301"
           test "$(curl -ksS -o /dev/null -w '%{http_code}' https://127.0.0.1:18443/healthz)" = "200"
+          curl -ksS -D "$RUNNER_TEMP/first-headers.txt" -o "$RUNNER_TEMP/resized.png" \
+            https://127.0.0.1:18443/77x77/sample.png
+          grep -qi '^X-Cache-Status: MISS' "$RUNNER_TEMP/first-headers.txt"
+          python -c 'import pathlib,struct; data=pathlib.Path("'"$RUNNER_TEMP"'/resized.png").read_bytes(); assert data[:8] == bytes.fromhex("89504e470d0a1a0a"), "response is not PNG"; w,h=struct.unpack(">II",data[16:24]); assert (w,h)==(77,58), f"unexpected resized dimensions: {w}x{h}"; print(f"direct-TLS image resize passed: {w}x{h}")'
+          curl -ksS -D "$RUNNER_TEMP/second-headers.txt" -o "$RUNNER_TEMP/resized-again.png" \
+            https://127.0.0.1:18443/77x77/sample.png
+          grep -qi '^X-Cache-Status: HIT' "$RUNNER_TEMP/second-headers.txt"
+          cmp "$RUNNER_TEMP/resized.png" "$RUNNER_TEMP/resized-again.png"
