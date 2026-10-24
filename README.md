@@ -58,7 +58,7 @@ docker build --build-arg NGINX_CONFIG=nginx-direct-tls.conf -t steady-nginx-imag
 docker run --rm \
   --network your-private-network \
   --read-only \
-  --cap-drop ALL --cap-add SETUID --cap-add SETGID --cap-add NET_BIND_SERVICE \
+  --cap-drop ALL --cap-add CHOWN --cap-add SETUID --cap-add SETGID --cap-add NET_BIND_SERVICE \
   --security-opt no-new-privileges:true \
   --tmpfs /run/nginx:rw,noexec,nosuid,size=1m,mode=0755 \
   --tmpfs /var/cache/nginx:rw,noexec,nosuid,size=96m,mode=1777 \
@@ -68,7 +68,7 @@ docker run --rm \
   steady-nginx-image-resizer:direct-tls
 ```
 
-The mounted directory must contain `tls.crt` and `tls.key`. The certificate should cover the public hostname. Keep private keys out of the image and manage renewal through your certificate-management process. Plain HTTP requests redirect to HTTPS; `/healthz` remains available on port 80 for health checks. The NGINX master binds low ports, while worker processes run as the `nginx` user. Only `SETUID` and `SETGID` (so the NGINX master can start workers as the configured `nginx` user) and `NET_BIND_SERVICE` (for ports 80 and 443) are retained; all other capabilities are dropped. Do not set a container-wide `USER nginx` without separately validating low-port binding, PID creation, and cache/temp directory permissions.
+The mounted directory must contain `tls.crt` and `tls.key`. The certificate should cover the public hostname. Keep private keys out of the image and manage renewal through your certificate-management process. Plain HTTP requests redirect to HTTPS; `/healthz` remains available on port 80 for health checks. The NGINX master binds low ports, while worker processes run as the `nginx` user. Only `CHOWN` (for NGINX cache-directory ownership), `SETUID`/`SETGID` (to start workers as the configured `nginx` user), and `NET_BIND_SERVICE` (for ports 80 and 443) are retained; all other capabilities are dropped. Do not set a container-wide `USER nginx` without separately validating low-port binding, PID creation, and cache/temp directory permissions.
 
 Use an existing Docker network in place of `your-private-network` (or create it as shown above). Attach the origin container/service to that same network with the network alias `origin` and port `8081`; the resizer must join the network as well so `origin:8081` resolves from inside its container. If the origin is managed by Compose, configure the shared network and alias there rather than creating a second origin container. Avoid publishing the origin or loopback transformer.
 
