@@ -249,6 +249,7 @@ class ImageResizerIntegrationTests(unittest.TestCase):
         status, _, _ = request("/77x77/not-an-image.png")
         self.assertGreaterEqual(status, 400)
 
+    @unittest.skipUnless(os.environ.get("VALIDATED_ORIGIN") == "1", "requires the optional validated-origin Compose overlay")
     def test_source_dimensions_are_rejected_before_image_filter_decode(self):
         # The fixture declares 50,000 x 50,000 pixels but contains only a tiny
         # body. The validator must reject it before NGINX image_filter decodes it.
