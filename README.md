@@ -117,6 +117,34 @@ Official NGINX documentation for the modules used by this project:
 - [Headers module](https://nginx.org/en/docs/http/ngx_http_headers_module.html) — response headers such as cache status.
 - [SSL module](https://nginx.org/en/docs/http/ngx_http_ssl_module.html) — HTTPS listeners and certificate configuration.
 
+## Load benchmarking
+
+A dependency-free load generator reports request throughput, latency percentiles, HTTP status counts, and `X-Cache-Status` counts. It is a measurement tool, not a CI performance gate; results are meaningful only when the host, Docker limits, origin behavior, and cache state are recorded.
+
+Start the demo stack in one terminal:
+
+```sh
+docker compose up --build -d nginx origin
+```
+
+Run these from the repository root in another terminal:
+
+```sh
+# Warm-cache path (repeat the same URL)
+python3 tools/benchmark.py --mode hit --requests 1000 --concurrency 16
+
+# Cache-bypass path (always exercises transformation/origin work)
+python3 tools/benchmark.py --mode bypass --requests 500 --concurrency 16
+
+# Unique cache keys (useful for measuring cold-path pressure)
+python3 tools/benchmark.py --mode unique --requests 500 --concurrency 16
+
+docker stats --no-stream
+docker compose down
+```
+
+Repeat at several concurrency levels (for example 1, 4, 8, 16, 32) and record the container memory/CPU from `docker stats`. Use a representative source image and realistic request mix. Do not infer a safe production concurrency limit from a single run or from CI timing; choose limits from sustained measurements and an explicit latency/error budget. The benchmark exits non-zero if requests fail or return a non-2xx status.
+
 ## Development
 
 ```sh
