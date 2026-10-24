@@ -9,7 +9,15 @@ def png_header(width, height):
 
 
 def gif_header(width, height):
-    return b"GIF89a" + struct.pack("<HH", width, height)
+    return b"GIF89a" + struct.pack("<HH", width, height) + bytes([0, 0, 0]) + b";"
+
+
+def gif_with_frame(screen_width, screen_height, frame_width, frame_height):
+    descriptor = (b"\\x2c" + struct.pack("<HHHH", 0, 0, frame_width, frame_height)
+                  + bytes([0]))
+    image_data = bytes([2, 1, 0, 0])  # LZW code size, one-byte sub-block, terminator.
+    return (b"GIF89a" + struct.pack("<HH", screen_width, screen_height)
+            + bytes([0, 0, 0]) + descriptor + image_data + b";")
 
 
 def jpeg_header(width, height):
@@ -55,6 +63,11 @@ class ImageDimensionValidationTests(unittest.TestCase):
     def test_rejects_source_above_dimension_limit(self):
         with self.assertRaisesRegex(validator.InvalidImage, "dimension limit"):
             validator.validate_image(gif_header(9000, 100))
+
+    def test_rejects_gif_frame_larger_than_logical_screen(self):
+        # A tiny logical screen must not hide a huge per-frame image descriptor.
+        with self.assertRaisesRegex(validator.InvalidImage, "dimension limit"):
+            validator.validate_image(gif_with_frame(1, 1, 9000, 100))
 
     def test_rejects_zero_dimensions(self):
         with self.assertRaisesRegex(validator.InvalidImage, "positive"):
