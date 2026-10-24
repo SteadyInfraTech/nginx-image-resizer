@@ -39,7 +39,7 @@ Only the edge service publishes a host port. The transformer server listens on 1
 
 ## CI coverage
 
-The integration suite exercises the real HTTP service and checks output dimensions/aspect ratio, cache MISS then HIT, map-based cache bypass (including that bypassed responses are not stored), cache-busting query variants for changed source content at the same path, variant separation, invalid dimensions, literal and encoded traversal attempts, missing origin objects, preservation of upstream 503, malformed image bytes, non-image responses, originals larger than the configured 8 MiB image-filter buffer, and concurrent same-key and distinct transformations.
+The integration suite exercises the real HTTP service and checks output dimensions/aspect ratio, cache MISS then HIT, map-based cache bypass (including that bypassed responses are not stored), cache-busting query variants for changed source content at the same path, variant separation, invalid dimensions, literal and encoded traversal attempts, missing origin objects, preservation of upstream 503, malformed image bytes, non-image responses, originals larger than the configured 8 MiB image-filter buffer, concurrent same-key and distinct transformations, and serving a previously cached image as `STALE` when the origin returns 503 after the entry expires.
 
 ## Limitations and threat model
 
@@ -48,7 +48,7 @@ The integration suite exercises the real HTTP service and checks output dimensio
 - Cold transformations consume CPU and memory. Large originals, many sizes, and high concurrency can be expensive. The 8 MiB image-filter buffer rejects sources that exceed the configured buffer; this is not a complete memory or CPU budget for the whole service.
 - Arbitrary sizes can fragment the cache; dimension bounds reduce but do not eliminate this.
 - Replacing an original at the same path does not automatically invalidate an existing cached variant. Use a versioned URL/query or wait for expiry; no purge API is implemented. Cache bypass forces an upstream fetch but deliberately does not update the cache entry.
-- [Proxy cache locking and stale response behavior](https://nginx.org/en/docs/http/ngx_http_proxy_module.html) still need deployment-specific testing under failure and high load.
+- The integration suite verifies stale-on-503 behavior for an expired cached entry. Timeout behavior, sustained origin failure, and high-load behavior still need deployment-specific testing.
 - The edge cache is local to one instance; replicas do not share cache contents automatically.
 - This is not a full image CDN or media platform. Advanced codecs, cropping, focal points, authorization, purge APIs, and global delivery are out of scope.
 
