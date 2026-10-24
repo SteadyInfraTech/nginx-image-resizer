@@ -85,6 +85,10 @@ class ImageResizerIntegrationTests(unittest.TestCase):
         status, _, _ = request("/77x77/missing.png")
         self.assertEqual(404, status)
 
+    def test_origin_503_is_preserved_through_image_filter(self):
+        status, _, _ = request("/77x77/origin-unavailable.png")
+        self.assertEqual(503, status)
+
     def test_non_image_origin_payload_is_not_served_as_image(self):
         status, _, _ = request("/77x77/not-an-image.png")
         self.assertGreaterEqual(status, 400)
