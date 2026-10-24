@@ -96,6 +96,8 @@ jobs:
           test "$ready" = "1"
           test "$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/healthz)" = "200"
           test "$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/77x77/sample.png)" = "301"
+          curl -sS -D "$RUNNER_TEMP/host-redirect-headers.txt" -o /dev/null -H 'Host: attacker.example' http://127.0.0.1:18080/redirect-check
+          grep -qi '^Location: https://localhost/redirect-check' "$RUNNER_TEMP/host-redirect-headers.txt"
           test "$(curl -ksS -o /dev/null -w '%{http_code}' https://127.0.0.1:18443/healthz)" = "200"
           # Keep input validation and traversal defenses covered for the
           # separate direct-TLS configuration, not only the default HTTP one.
