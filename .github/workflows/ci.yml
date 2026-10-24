@@ -47,6 +47,16 @@ jobs:
           sudo chown root:root "$RUNNER_TEMP/image-resizer-tls/tls.key" "$RUNNER_TEMP/image-resizer-tls/tls.crt"
           sudo chmod 600 "$RUNNER_TEMP/image-resizer-tls/tls.key"
           sudo chmod 644 "$RUNNER_TEMP/image-resizer-tls/tls.crt"
+      - name: Validate invalid build arguments fail fast
+        run: |
+          if docker build --build-arg NGINX_MAX_CONCURRENT_IMAGE_REQUESTS=not-a-number -t invalid-concurrency-test .; then
+            echo "invalid concurrency build argument was accepted" >&2
+            exit 1
+          fi
+          if docker build --build-arg NGINX_CACHE_VALIDITY="10m; echo injected" -t invalid-cache-ttl-test .; then
+            echo "invalid cache TTL build argument was accepted" >&2
+            exit 1
+          fi
       - name: Build direct-TLS and demo-origin images
         run: |
           docker build --build-arg NGINX_CONFIG=nginx-direct-tls.conf -t steady-nginx-image-resizer:direct-tls .
