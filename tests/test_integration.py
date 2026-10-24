@@ -69,7 +69,7 @@ class ImageResizerIntegrationTests(unittest.TestCase):
         self.assertEqual(first_body, second_body)
 
     def test_bypass_cache_argument_skips_lookup_and_storage(self):
-        bypass_path = "/77x77/sample.png?version=1&bypass_cache=1"
+        bypass_path = "/77x77/sample.png?version=cache-bypass&bypass_cache=1"
         first_status, first_headers, first_body = request(bypass_path)
         second_status, second_headers, second_body = request(bypass_path)
         self.assertEqual(first_status, 200)
@@ -78,7 +78,7 @@ class ImageResizerIntegrationTests(unittest.TestCase):
         self.assertEqual("BYPASS", second_headers.get("X-Cache-Status"))
         self.assertEqual(first_body, second_body)
 
-        normal_path = "/77x77/sample.png?version=1"
+        normal_path = "/77x77/sample.png?version=cache-bypass"
         normal_first_status, normal_first_headers, _ = request(normal_path)
         normal_second_status, normal_second_headers, _ = request(normal_path)
         self.assertEqual(normal_first_status, 200)
