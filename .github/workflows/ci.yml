@@ -117,7 +117,7 @@ jobs:
           docker compose up --build -d nginx origin
           ready=0
           for attempt in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:8080/healthz >/dev/null; then ready=1; break; fi
+            if [ "$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/77x77/sample.png)" = "200" ]; then ready=1; break; fi
             sleep 1
           done
           test "$ready" = "1"
