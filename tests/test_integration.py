@@ -148,6 +148,12 @@ class ImageResizerIntegrationTests(unittest.TestCase):
         self.assertNotEqual(first_body, second_body)
 
     def test_client_host_header_cannot_select_or_poison_origin_content(self):
+        # The origin's canonical response for this fixture is version 2.
+        expected_status, _, expected_body = request(
+            "/77x77/sample.png?version=2"
+        )
+        self.assertEqual(200, expected_status)
+
         path = "/77x77/host-sensitive.png?case=fixed-origin-host"
         attacker_status, attacker_headers, attacker_body = request(
             path, headers={"Host": "attacker.example"}
@@ -157,8 +163,9 @@ class ImageResizerIntegrationTests(unittest.TestCase):
         self.assertEqual(200, normal_status)
         self.assertEqual("MISS", attacker_headers.get("X-Cache-Status"))
         self.assertEqual("HIT", normal_headers.get("X-Cache-Status"))
-        # The fixed upstream Host selects the same origin response regardless
-        # of the client Host header, and both requests share a safe cache key.
+        # A client-supplied Host must not select different origin content
+        # under a cache key that intentionally does not include that header.
+        self.assertEqual(expected_body, attacker_body)
         self.assertEqual(attacker_body, normal_body)
         assert_fits_resize_box(self, attacker_body, 77, 77)
 
