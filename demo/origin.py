@@ -77,6 +77,17 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+        elif parsed.path == "/accept-sensitive.png":
+            # A client Accept header must not select a different cached variant.
+            body = (PNG if self.headers.get("Accept") == "text/html"
+                    or self.headers.get("Cookie") == "variant=attacker"
+                    or self.headers.get("Authorization") == "Bearer attacker"
+                    else PNG_VERSION_2)
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
         elif parsed.path == "/sample.png":
             body = PNG_VERSION_2 if query.get("version") == ["2"] else PNG
             self.send_response(200)

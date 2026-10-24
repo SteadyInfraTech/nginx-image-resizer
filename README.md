@@ -81,6 +81,7 @@ Use an existing Docker network in place of `your-private-network` (or create it 
 - Width and height are bounded to 1–2048.
 - At most 16 image requests per instance are processed concurrently by default; excess requests receive HTTP 503. Tune at build time with `--build-arg NGINX_MAX_CONCURRENT_IMAGE_REQUESTS=...` based on measured capacity.
 - The upstream origin is fixed by configuration; clients cannot provide an arbitrary origin URL.
+- Client request headers are not forwarded to the origin; the resizer sends a fixed `Accept` value so headers such as `Host`, `Accept`, `Cookie`, or `Authorization` cannot select a different origin representation under the same URL-based cache key. Origin authentication via client-forwarded headers is intentionally unsupported.
 - Cache keys include the URI and query string, so requested sizes and versioned query variants are cached separately.
 - Add `?bypass_cache=1` to skip cache lookup and storage. Values `1`, `true`, and `yes` are recognized. The response includes `X-Cache-Status: BYPASS`.
 - Cache bypass does not purge or replace an existing cached entry.
