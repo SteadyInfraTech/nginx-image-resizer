@@ -14,7 +14,7 @@ services:
       MAX_SOURCE_BYTES: "8388608"
       MAX_SOURCE_PIXELS: "16777216"
       MAX_SOURCE_DIMENSION: "8192"
-    depends_on: [validator]
+    depends_on: [origin]
     expose: ["8082"]
     read_only: true
     security_opt:
@@ -27,7 +27,7 @@ services:
         NGINX_CONFIG: nginx.conf
         NGINX_CACHE_VALIDITY: 1s
     ports: ["${NGINX_HOST_PORT:-8080}:8080"]
-    depends_on: [origin]
+    depends_on: [validator]
     # Keep the image filesystem immutable at runtime. NGINX needs writable
     # space only for its PID, cache, and temporary files.
     read_only: true
