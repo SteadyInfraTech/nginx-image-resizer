@@ -61,7 +61,7 @@ docker run --rm \
   --cap-drop ALL --cap-add CHOWN --cap-add SETUID --cap-add SETGID --cap-add NET_BIND_SERVICE \
   --security-opt no-new-privileges:true \
   --tmpfs /run/nginx:rw,noexec,nosuid,size=1m,mode=0755 \
-  --tmpfs /var/lib/nginx:rw,noexec,nosuid,size=16m,mode=1777 \
+  --tmpfs /var/lib/nginx/tmp:rw,noexec,nosuid,size=16m,mode=1777 \
   --tmpfs /var/cache/nginx:rw,noexec,nosuid,size=96m,mode=1777 \
   --tmpfs /tmp:rw,noexec,nosuid,size=16m,mode=1777 \
   -p 80:80 -p 443:443 \
