@@ -1,0 +1,13 @@
+FROM python:3.13-alpine
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    MAX_SOURCE_BYTES=8388608 \
+    MAX_SOURCE_PIXELS=16777216 \
+    MAX_SOURCE_DIMENSION=8192
+
+WORKDIR /app
+COPY validator.py /app/validator.py
+USER 65532:65532
+EXPOSE 8082
+CMD ["python", "/app/validator.py"]
