@@ -1,0 +1,38 @@
+services:
+  origin:
+    build:
+      context: .
+      dockerfile: demo/Dockerfile
+    expose: ["8081"]
+
+  transformer:
+    build:
+      context: .
+      args:
+        NGINX_CONFIG: nginx-transform.conf
+    depends_on: [origin]
+    expose: ["8082"]
+
+  nginx:
+    build:
+      context: .
+      args:
+        NGINX_CONFIG: nginx-edge.conf
+    ports: ["8080:8080"]
+    depends_on: [transformer]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+
+  tests:
+    build:
+      context: .
+      dockerfile: tests/Dockerfile
+    environment:
+      BASE_URL: http://nginx:8080
+    depends_on:
+      nginx:
+        condition: service_healthy
+    command: ["python", "-m", "unittest", "discover", "-s", "tests", "-v"]
