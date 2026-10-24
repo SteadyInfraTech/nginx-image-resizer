@@ -169,6 +169,24 @@ class ImageResizerIntegrationTests(unittest.TestCase):
         self.assertEqual(attacker_body, normal_body)
         assert_fits_resize_box(self, attacker_body, 77, 77)
 
+    def test_client_accept_header_cannot_select_or_poison_origin_content(self):
+        expected_status, _, expected_body = request("/77x77/sample.png?version=2")
+        self.assertEqual(200, expected_status)
+
+        path = "/77x77/accept-sensitive.png?case=fixed-origin-accept"
+        client_status, client_headers, client_body = request(
+            path, headers={"Accept": "text/html"}
+        )
+        normal_status, normal_headers, normal_body = request(path)
+        self.assertEqual(200, client_status)
+        self.assertEqual(200, normal_status)
+        self.assertEqual("MISS", client_headers.get("X-Cache-Status"))
+        self.assertEqual("HIT", normal_headers.get("X-Cache-Status"))
+        # The origin sees a fixed image Accept value regardless of client input.
+        self.assertEqual(expected_body, client_body)
+        self.assertEqual(client_body, normal_body)
+        assert_fits_resize_box(self, client_body, 77, 77)
+
     def test_different_sizes_are_distinct_variants(self):
         _, _, small = request("/31x29/sample.png")
         _, _, large = request("/111x87/sample.png")
