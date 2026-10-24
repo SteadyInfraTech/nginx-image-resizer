@@ -249,6 +249,12 @@ class ImageResizerIntegrationTests(unittest.TestCase):
         status, _, _ = request("/77x77/not-an-image.png")
         self.assertGreaterEqual(status, 400)
 
+    def test_source_dimensions_are_rejected_before_image_filter_decode(self):
+        # The fixture declares 50,000 x 50,000 pixels but contains only a tiny
+        # body. The validator must reject it before NGINX image_filter decodes it.
+        status, _, body = request("/77x77/dimension-bomb.png")
+        self.assertEqual(415, status, body[:200])
+
     def test_source_larger_than_image_filter_buffer_is_rejected(self):
         status, _, body = request("/77x77/oversized.png")
         self.assertEqual(415, status, body[:200])
