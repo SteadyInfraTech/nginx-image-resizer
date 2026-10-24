@@ -120,6 +120,19 @@ class ImageResizerIntegrationTests(unittest.TestCase):
         self.assertEqual("MISS", normal_first_headers.get("X-Cache-Status"))
         self.assertEqual("HIT", normal_second_headers.get("X-Cache-Status"))
 
+        # nginx.conf documents all three supported truthy values. Each must
+        # bypass both cache lookup and storage, not just the numeric form.
+        for value in ("true", "yes"):
+            with self.subTest(bypass_cache=value):
+                path = f"/77x77/sample.png?version=cache-bypass-{value}&bypass_cache={value}"
+                first_status, first_headers, first_body = request(path)
+                second_status, second_headers, second_body = request(path)
+                self.assertEqual(200, first_status)
+                self.assertEqual(200, second_status)
+                self.assertEqual("BYPASS", first_headers.get("X-Cache-Status"))
+                self.assertEqual("BYPASS", second_headers.get("X-Cache-Status"))
+                self.assertEqual(first_body, second_body)
+
     def test_cache_busting_query_fetches_changed_source_at_same_path(self):
         first_status, first_headers, first_body = request("/77x77/sample.png?version=1")
         second_status, second_headers, second_body = request("/77x77/sample.png?version=2")
