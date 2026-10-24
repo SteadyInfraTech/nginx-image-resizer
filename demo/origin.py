@@ -1,6 +1,7 @@
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 import struct
+import threading
 import zlib
 
 
@@ -30,6 +31,8 @@ PNG = make_png()
 PNG_VERSION_2 = make_png(color=(196, 82, 59))
 CORRUPT_PNG = b"\x89PNG\r\n\x1a\n" + b"not-a-valid-png-chunk"
 OVERSIZED_PNG = make_oversized_png()
+STALE_SAMPLE_AVAILABLE = True
+STALE_SAMPLE_LOCK = threading.Lock()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -37,7 +40,27 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlsplit(self.path)
         query = parse_qs(parsed.query)
 
-        if parsed.path == "/sample.png":
+        if parsed.path == "/__test__/stale-sample-status":
+            self.send_error(405)
+        elif parsed.path == "/stale-sample.png":
+            with STALE_SAMPLE_LOCK:
+                available = STALE_SAMPLE_AVAILABLE
+            if not available:
+                body = b"origin temporarily unavailable"
+                self.send_response(503)
+                self.send_header("Content-Type", "text/plain")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            body = PNG
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Cache-Control", "max-age=1")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif parsed.path == "/sample.png":
             body = PNG_VERSION_2 if query.get("version") == ["2"] else PNG
             self.send_response(200)
             self.send_header("Content-Type", "image/png")
@@ -74,6 +97,25 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
         else:
             self.send_error(404)
+
+    def do_POST(self):
+        global STALE_SAMPLE_AVAILABLE
+        parsed = urlsplit(self.path)
+        if parsed.path != "/__test__/stale-sample-status":
+            self.send_error(404)
+            return
+        try:
+            status = int(self.rfile.read(int(self.headers.get("Content-Length", "0"))).decode("ascii"))
+        except (ValueError, UnicodeDecodeError):
+            self.send_error(400)
+            return
+        if status not in (200, 503):
+            self.send_error(400)
+            return
+        with STALE_SAMPLE_LOCK:
+            STALE_SAMPLE_AVAILABLE = status == 200
+        self.send_response(204)
+        self.end_headers()
 
     def log_message(self, fmt, *args):
         print("%s - %s" % (self.address_string(), fmt % args), flush=True)
