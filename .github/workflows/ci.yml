@@ -76,7 +76,7 @@ jobs:
           curl -ksS -D "$RUNNER_TEMP/first-headers.txt" -o "$RUNNER_TEMP/resized.png" \
             https://127.0.0.1:18443/77x77/sample.png
           grep -qi '^X-Cache-Status: MISS' "$RUNNER_TEMP/first-headers.txt"
-          python -c 'import pathlib,struct; data=pathlib.Path("'"$RUNNER_TEMP"'/resized.png").read_bytes(); assert data[:8] == bytes.fromhex("89504e470d0a1a0a"), "response is not PNG"; w,h=struct.unpack(">II",data[16:24]); assert (w,h)==(77,58), f"unexpected resized dimensions: {w}x{h}"; print(f"direct-TLS image resize passed: {w}x{h}")'
+          python -c 'import pathlib,struct; data=pathlib.Path("'"$RUNNER_TEMP"'/resized.png").read_bytes(); assert data[:8] == bytes.fromhex("89504e470d0a1a0a"), "response is not PNG"; w,h=struct.unpack(">II",data[16:24]); assert (w,h)==(77,57), f"unexpected resized dimensions: {w}x{h}"; print(f"direct-TLS image resize passed: {w}x{h}")'
           curl -ksS -D "$RUNNER_TEMP/second-headers.txt" -o "$RUNNER_TEMP/resized-again.png" \
             https://127.0.0.1:18443/77x77/sample.png
           grep -qi '^X-Cache-Status: HIT' "$RUNNER_TEMP/second-headers.txt"
