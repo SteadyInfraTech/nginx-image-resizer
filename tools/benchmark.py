@@ -33,6 +33,18 @@ def percentile(values: list[float], fraction: float) -> float:
     return round(ordered[index], 2)
 
 
+def add_query_parameter(url: str, key: str, value: str, *, replace: bool = False) -> str:
+    """Add a query parameter without placing it after a URL fragment."""
+    parsed = urllib.parse.urlsplit(url)
+    query = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+    if replace:
+        query = [(name, current) for name, current in query if name != key]
+    query.append((key, value))
+    return urllib.parse.urlunsplit(
+        (parsed.scheme, parsed.netloc, parsed.path, urllib.parse.urlencode(query), parsed.fragment)
+    )
+
+
 def request_one(url: str, timeout: float) -> Result:
     started = time.perf_counter()
     req = urllib.request.Request(url, headers={"User-Agent": "steady-image-resizer-benchmark/1.0"})
@@ -93,15 +105,9 @@ def main() -> int:
         for request_id in range(worker_id, args.requests, args.concurrency):
             url = base + path
             if args.mode == "bypass":
-                separator = "&" if "?" in url else "?"
-                url += separator + "bypass_cache=1"
+                url = add_query_parameter(url, "bypass_cache", "1", replace=True)
             elif args.mode == "unique":
-                parsed = urllib.parse.urlsplit(url)
-                query = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
-                query.append(("benchmark_request", str(request_id)))
-                url = urllib.parse.urlunsplit(
-                    (parsed.scheme, parsed.netloc, parsed.path, urllib.parse.urlencode(query), parsed.fragment)
-                )
+                url = add_query_parameter(url, "benchmark_request", str(request_id))
             results.append(request_one(url, args.timeout))
         return results
 

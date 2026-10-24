@@ -28,6 +28,25 @@ class BenchmarkUnitTests(unittest.TestCase):
             benchmark.percentile([5, 3, 1, 4, 2], 0.80),
         )
 
+    def test_query_parameter_is_added_before_fragment(self):
+        self.assertEqual(
+            "http://example.test/image.png?bypass_cache=1#preview",
+            benchmark.add_query_parameter(
+                "http://example.test/image.png#preview", "bypass_cache", "1", replace=True
+            ),
+        )
+
+    def test_bypass_parameter_replaces_existing_duplicates(self):
+        self.assertEqual(
+            "http://example.test/image.png?keep=yes&bypass_cache=1",
+            benchmark.add_query_parameter(
+                "http://example.test/image.png?keep=yes&bypass_cache=0&bypass_cache=0",
+                "bypass_cache",
+                "1",
+                replace=True,
+            ),
+        )
+
     def test_non_finite_timeout_is_rejected_before_requests_start(self):
         for timeout in ("nan", "inf", "-inf"):
             with self.subTest(timeout=timeout):
