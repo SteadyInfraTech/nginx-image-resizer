@@ -11,7 +11,7 @@ The guiding rule is: keep the request path simple, make the engineering around i
 - **Default:** one NGINX process with a fixed, trusted origin. NGINX validates the request path and dimensions, fetches the source, applies the image filter, and caches the transformed response.
 - **Optional validated-origin mode:** a separate private service checks bounded PNG/GIF/JPEG headers before NGINX decodes the source. This is a defense-in-depth option, not a full decoder sandbox and not the default.
 - **Docker Compose:** supported for deterministic tests, demos, and small deployments.
-- **Kubernetes + Helm:** the intended reusable deployment target for v1.0.x. The chart must use the same application image and preserve the same documented request semantics.
+- **Kubernetes + Helm:** the intended reusable deployment target for v1.0.0. The chart must use the same application image and preserve the same documented request semantics.
 - **Out of scope for v1.0.0:** AWS AMI, globally shared cache, image CDN, external cache/control plane, arbitrary remote-origin URLs, and a custom image-processing engine.
 
 ## Trust and security model
