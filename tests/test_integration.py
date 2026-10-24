@@ -146,7 +146,6 @@ class ImageResizerIntegrationTests(unittest.TestCase):
     def test_concurrent_requests_for_same_variant(self):
         with ThreadPoolExecutor(max_workers=8) as pool:
             results = list(pool.map(lambda _: request("/137x91/sample.png"), range(8)))
-        statuses = [status for status, _, _ in results]
         cache_statuses = [headers.get("X-Cache-Status") for _, headers, _ in results]
         for status, _, body in results:
             self.assertEqual(status, 200)
