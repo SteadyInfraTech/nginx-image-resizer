@@ -7,9 +7,9 @@ def png_chunk(kind: bytes, data: bytes) -> bytes:
     return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body) & 0xffffffff)
 
 def make_png(width=320, height=240):
-    row = b"\\x00" + (b"\\x3b\\x82\\xc4" * width)
+    row = b"\x00" + (b"\x3b\x82\xc4" * width)
     raw = row * height
-    return (b"\\x89PNG\\r\\n\\x1a\\n"
+    return (b"\x89PNG\r\n\x1a\n"
             + png_chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
             + png_chunk(b"IDAT", zlib.compress(raw))
             + png_chunk(b"IEND", b""))
