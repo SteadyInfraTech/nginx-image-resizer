@@ -7,6 +7,11 @@ cleanup() {
   rm -rf "$tmp_dir"
 }
 trap cleanup EXIT
+on_error() {
+  docker compose ps >&2 || true
+  docker compose logs --no-color nginx origin >&2 || true
+}
+trap on_error ERR
 
 NGINX_CACHE_VALIDITY=10m NGINX_CACHE_TMPFS_SIZE=512k NGINX_HOST_PORT=18080 docker compose up --build -d nginx origin
 
