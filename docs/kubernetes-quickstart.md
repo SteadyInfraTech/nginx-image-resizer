@@ -32,7 +32,7 @@ If the origin is in another namespace, use its full service DNS name. The comman
 The chart creates a ClusterIP Service and does not create an origin, Ingress, or public load balancer. The example below uses the pre-release `main` image and a sample origin Service in the `default` namespace:
 
 ```sh
-helm upgrade --install image-resizer ./charts/nginx-image-resizer \
+helm upgrade --install nginx-image-resizer ./charts/nginx-image-resizer \
   --namespace image-resizer --create-namespace \
   --set origin.host=origin.default.svc.cluster.local \
   --set origin.port=8081 \
@@ -40,17 +40,17 @@ helm upgrade --install image-resizer ./charts/nginx-image-resizer \
   --wait --timeout 5m
 
 kubectl -n image-resizer get pods,svc
-kubectl -n image-resizer rollout status deployment/image-resizer --timeout=5m
+kubectl -n image-resizer rollout status deployment/nginx-image-resizer --timeout=5m
 ```
 
-If the Deployment name differs because you changed the Helm release name or chart naming values, use the name shown by `kubectl get deployments -n image-resizer`.
+If you change the Helm release name or chart naming values, use the Deployment and Service names shown by `kubectl get deployments,services -n image-resizer`.
 
 ## Verify resize and cache HIT
 
 Forward the ClusterIP Service to your workstation:
 
 ```sh
-kubectl -n image-resizer port-forward svc/image-resizer 8080:8080
+kubectl -n image-resizer port-forward svc/nginx-image-resizer 8080:8080
 ```
 
 Keep that command running in one terminal. In another terminal, run:
@@ -83,7 +83,7 @@ The request contract is `/{width}x{height}/{origin-relative-path}`. For example,
 
 To put it into an application path:
 
-1. Configure an existing Ingress controller, gateway, or load balancer to forward the desired image-resize route to the `image-resizer` Service on port 8080.
+1. Configure an existing Ingress controller, gateway, or load balancer to forward the desired image-resize route to the `nginx-image-resizer` Service on port 8080.
 2. Change your image URL template or application integration to request the resize prefix, such as `/77x77/`, unless your existing URLs already follow this contract.
 3. Keep the origin and resizer Service private to trusted cluster/network paths. Terminate public TLS at your existing ingress or load balancer.
 4. Test source-not-found, origin errors, cache behavior, and representative image sizes before directing production traffic.
