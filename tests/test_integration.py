@@ -74,7 +74,7 @@ def gif_dimensions(data):
 
 
 def jpeg_dimensions(data):
-    if data[:2] != b"\\xff\\xd8":
+    if data[:2] != b"\xff\xd8":
         raise AssertionError("response is not JPEG")
     position = 2
     sof_markers = {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF}
