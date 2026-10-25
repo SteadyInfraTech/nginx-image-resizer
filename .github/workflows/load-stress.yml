@@ -1,0 +1,78 @@
+name: Load stress
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  load-stress:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Start demo stack with a stable cache TTL
+        run: |
+          NGINX_CACHE_VALIDITY=10m docker compose up --build -d nginx origin
+          ready=0
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/healthz >/dev/null; then ready=1; break; fi
+            sleep 1
+          done
+          test "$ready" = "1"
+      - name: Run 1,000-request cache and stampede scenarios
+        run: |
+          set -eu
+          base_url=http://127.0.0.1:8080
+          path=/77x77/sample.png
+          requests=1000
+          concurrency=16
+          for mode in hit bypass unique stampede; do
+            report="$RUNNER_TEMP/load-$mode.json"
+            python3 tools/benchmark.py \
+              --base-url "$base_url" --path "$path" \
+              --requests "$requests" --concurrency "$concurrency" \
+              --timeout 5 --mode "$mode" > "$report"
+            MODE="$mode" REQUESTS="$requests" REPORT="$report" python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          mode = os.environ["MODE"]
+          expected_requests = int(os.environ["REQUESTS"])
+          report = json.loads(Path(os.environ["REPORT"]).read_text())
+          assert report["requests_completed"] == expected_requests, report
+          assert report["http_status_counts"] == {"200": expected_requests}, report
+          if mode == "stampede":
+              assert report["cache_status_counts"] == {"HIT": expected_requests - 1, "MISS": 1}, report
+          else:
+              expected_cache = {"hit": "HIT", "bypass": "BYPASS", "unique": "MISS"}[mode]
+              assert report["cache_status_counts"] == {expected_cache: expected_requests}, report
+          assert not report["errors"], report
+          print(
+              f"{mode}: {report['requests_completed']} requests, "
+              f"{report['requests_per_second']} req/s, "
+              f"p95={report['latency_ms']['p95']}ms, "
+              f"p99={report['latency_ms']['p99']}ms, "
+              f"cache={report['cache_status_counts']}"
+          )
+          PY
+          done
+      - name: Show logs on failure
+        if: failure()
+        run: docker compose logs --no-color
+      - name: Upload benchmark reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-resizer-load-reports
+          path: ${{ runner.temp }}/load-*.json
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Clean up
+        if: always()
+        run: docker compose down --volumes --remove-orphans
