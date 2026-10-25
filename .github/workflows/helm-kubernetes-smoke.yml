@@ -45,8 +45,7 @@ jobs:
             --set image.tag=ci \
             --set image.pullPolicy=IfNotPresent \
             --set origin.host=origin \
-            --set replicaCount=1 \
-            --wait --timeout=180s
+            --set replicaCount=1
           kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=120s
       - name: Diagnose Kubernetes startup failures
         if: failure()
