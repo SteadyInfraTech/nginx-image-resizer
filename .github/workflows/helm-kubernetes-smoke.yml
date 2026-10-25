@@ -48,6 +48,14 @@ jobs:
             --set replicaCount=1 \
             --wait --timeout=180s
           kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=120s
+      - name: Diagnose Kubernetes startup failures
+        if: failure()
+        run: |
+          kubectl get pods -o wide || true
+          kubectl get events --sort-by=.lastTimestamp || true
+          kubectl describe pods || true
+          kubectl logs deployment/resizer-nginx-image-resizer --all-containers=true --tail=200 || true
+          kubectl logs deployment/origin --all-containers=true --tail=100 || true
       - name: Verify resize, cache hit, and Helm upgrade
         run: |
           set -eu
