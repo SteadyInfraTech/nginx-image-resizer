@@ -168,7 +168,7 @@ jobs:
           requests=40
           concurrency=4
           curl -fsS -o /dev/null "$base_url$path"
-          for mode in hit bypass unique; do
+          for mode in hit bypass unique stampede; do
             report="$RUNNER_TEMP/benchmark-$mode.json"
             python3 tools/benchmark.py \
               --base-url "$base_url" --path "$path" \
@@ -184,8 +184,11 @@ jobs:
           report = json.loads(Path(os.environ["REPORT"]).read_text())
           assert report["requests_completed"] == expected_requests, report
           assert report["http_status_counts"] == {"200": expected_requests}, report
-          expected_cache = {"hit": "HIT", "bypass": "BYPASS", "unique": "MISS"}[mode]
-          assert report["cache_status_counts"] == {expected_cache: expected_requests}, report
+          if mode == "stampede":
+              assert report["cache_status_counts"] == {"HIT": expected_requests - 1, "MISS": 1}, report
+          else:
+              expected_cache = {"hit": "HIT", "bypass": "BYPASS", "unique": "MISS"}[mode]
+              assert report["cache_status_counts"] == {expected_cache: expected_requests}, report
           assert not report["errors"], report
           print(
               f"{mode}: {report['requests_completed']} requests, "

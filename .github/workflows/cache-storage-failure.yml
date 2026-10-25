@@ -1,0 +1,20 @@
+name: Cache storage failure
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cache-storage-failure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Verify origin response survives cache write failure
+        run: bash tests/test_cache_storage_failure.sh
