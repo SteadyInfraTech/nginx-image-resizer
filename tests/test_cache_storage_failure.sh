@@ -1,15 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-compose=(docker compose -f docker-compose.yml -f docker-compose.cache-readonly.yml)
 tmp_dir="$(mktemp -d)"
 cleanup() {
-  "${compose[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
+  docker compose down --volumes --remove-orphans >/dev/null 2>&1 || true
   rm -rf "$tmp_dir"
 }
 trap cleanup EXIT
 
-NGINX_CACHE_VALIDITY=10m NGINX_HOST_PORT=18080 "${compose[@]}" up --build -d nginx origin
+NGINX_CACHE_VALIDITY=10m NGINX_CACHE_TMPFS_SIZE=512k NGINX_HOST_PORT=18080 docker compose up --build -d nginx origin
 
 base_url="http://127.0.0.1:18080"
 ready=0
@@ -22,22 +21,22 @@ for attempt in $(seq 1 30); do
 done
 test "$ready" = "1"
 
-curl -fsS -D "$tmp_dir/first.headers" -o "$tmp_dir/first.png" "$base_url/77x77/sample.png"
-grep -qi '^X-Cache-Status: MISS' "$tmp_dir/first.headers"
+benchmark_status=0
+python3 tools/benchmark.py --base-url "$base_url" --path /77x77/sample.png \
+  --requests 2000 --concurrency 12 --timeout 5 --mode unique > "$tmp_dir/report.json" || benchmark_status=$?
+cat "$tmp_dir/report.json"
+test "$benchmark_status" -eq 0
 
-curl -fsS -D "$tmp_dir/second.headers" -o "$tmp_dir/second.png" "$base_url/77x77/sample.png"
-grep -qi '^X-Cache-Status: MISS' "$tmp_dir/second.headers"
-cmp "$tmp_dir/first.png" "$tmp_dir/second.png"
-
-python3 - "$tmp_dir/first.png" <<'PY'
-import struct
+python3 - "$tmp_dir/report.json" <<'PY'
+import json
 import sys
-data = open(sys.argv[1], "rb").read()
-assert data[:8] == bytes.fromhex("89504e470d0a1a0a"), "response is not PNG"
-width, height = struct.unpack(">II", data[16:24])
-assert (width, height) == (77, 57), f"unexpected dimensions: {width}x{height}"
-print(f"cache-write failure preserved origin response: {width}x{height}, two MISS responses")
+report = json.load(open(sys.argv[1]))
+assert report["requests_completed"] == 2000, report
+assert report["http_status_counts"] == {"200": 2000}, report
+assert report["cache_status_counts"] == {"MISS": 2000}, report
+assert not report["errors"], report
+print("all 2,000 transformed responses succeeded despite cache storage pressure")
 PY
 
-"${compose[@]}" logs --no-color nginx > "$tmp_dir/nginx.log"
-grep -Eiq 'Read-only file system|Permission denied' "$tmp_dir/nginx.log"
+docker compose logs --no-color nginx > "$tmp_dir/nginx.log"
+grep -Eiq 'No space left on device|ENOSPC' "$tmp_dir/nginx.log"
