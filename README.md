@@ -163,8 +163,11 @@ docker compose up --build -d nginx origin
 Run these from the repository root in another terminal:
 
 ```sh
-# Warm-cache path (repeat the same URL)
+# Warm-cache path (the tool warms the URL before measuring)
 python3 tools/benchmark.py --mode hit --requests 1000 --concurrency 16
+
+# Cold same-key burst (one miss, then cache hits if cache locking works)
+python3 tools/benchmark.py --mode stampede --requests 1000 --concurrency 16
 
 # Cache-bypass path (always exercises transformation/origin work)
 python3 tools/benchmark.py --mode bypass --requests 500 --concurrency 16
@@ -176,7 +179,7 @@ docker stats --no-stream
 docker compose down
 ```
 
-Repeat at several concurrency levels (for example 1, 4, 8, 16, 32) and record the container memory/CPU from `docker stats`. Use a representative source image and realistic request mix. Do not infer a safe production concurrency limit from a single run or from CI timing; choose limits from sustained measurements and an explicit latency/error budget. The benchmark exits non-zero if requests fail or return a non-2xx status.
+The scheduled/manual Load Stress workflow also runs 1,000 requests per mode at concurrency 16 and archives the JSON reports. It checks status/cache correctness, not a machine-independent latency target. Repeat at several concurrency levels (for example 1, 4, 8, 16, 32) and record the container memory/CPU from `docker stats`. Use a representative source image and realistic request mix. Do not infer a safe production concurrency limit from a single run or from CI timing; choose limits from sustained measurements and an explicit latency/error budget. The benchmark exits non-zero if requests fail or return a non-2xx status.
 
 ## Development
 
