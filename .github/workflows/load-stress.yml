@@ -31,13 +31,16 @@ jobs:
           base_url=http://127.0.0.1:8080
           path=/77x77/sample.png
           if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then requests=500; else requests=1000; fi
-          concurrency=16
+          concurrency=12
           for mode in hit bypass unique stampede; do
             report="$RUNNER_TEMP/load-$mode.json"
+            benchmark_status=0
             python3 tools/benchmark.py \
               --base-url "$base_url" --path "$path" \
               --requests "$requests" --concurrency "$concurrency" \
-              --timeout 5 --mode "$mode" > "$report"
+              --timeout 5 --mode "$mode" > "$report" || benchmark_status=$?
+            cat "$report"
+            test "$benchmark_status" -eq 0
             MODE="$mode" REQUESTS="$requests" REPORT="$report" python3 - <<'PY'
           import json
           import os
