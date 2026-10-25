@@ -138,7 +138,7 @@ class ImageResizerIntegrationTests(unittest.TestCase):
         assert_fits_resize_box(self, body, 77, 77)
 
     def test_jpeg_is_resized_and_cached(self):
-        path = "/77x77/sample.jpg"
+        path = "/16x16/sample.jpg"
         first_status, first_headers, first_body = request(path)
         second_status, second_headers, second_body = request(path)
         self.assertEqual(200, first_status)
@@ -147,8 +147,8 @@ class ImageResizerIntegrationTests(unittest.TestCase):
         self.assertEqual("MISS", first_headers.get("X-Cache-Status"))
         self.assertEqual("HIT", second_headers.get("X-Cache-Status"))
         width, height = jpeg_dimensions(first_body)
-        self.assertLessEqual(width, 77)
-        self.assertLessEqual(height, 77)
+        self.assertLessEqual(width, 16)
+        self.assertLessEqual(height, 16)
         self.assertAlmostEqual(width / height, SOURCE_ASPECT_RATIO, delta=0.03)
         self.assertEqual(first_body, second_body)
 
