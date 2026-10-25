@@ -1,8 +1,13 @@
 import importlib.util
+import json
 import pathlib
 import subprocess
 import sys
 import unittest
+import urllib.parse
+from contextlib import redirect_stdout
+from io import StringIO
+from unittest.mock import patch
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -46,6 +51,41 @@ class BenchmarkUnitTests(unittest.TestCase):
                 replace=True,
             ),
         )
+
+    def _run_mock_benchmark(self, mode, requests=8, concurrency=4):
+        urls = []
+        output = StringIO()
+
+        def fake_request(url, timeout):
+            urls.append(url)
+            return benchmark.Result(200, 1.0, "HIT")
+
+        argv = [
+            str(BENCHMARK_PATH), "--requests", str(requests),
+            "--concurrency", str(concurrency), "--mode", mode,
+        ]
+        with patch.object(sys, "argv", argv), patch.object(
+            benchmark, "request_one", side_effect=fake_request
+        ), patch.object(benchmark.time, "time_ns", return_value=123), redirect_stdout(output):
+            result = benchmark.main()
+        return result, urls, json.loads(output.getvalue())
+
+    def test_hit_mode_warms_cache_before_timed_requests(self):
+        result, urls, report = self._run_mock_benchmark("hit")
+        self.assertEqual(0, result)
+        self.assertEqual(9, len(urls))  # one warm-up plus eight measured requests
+        self.assertEqual(1, len(set(urls)))
+        self.assertEqual(8, report["requests_completed"])
+
+    def test_stampede_mode_uses_one_unique_cold_key_for_all_requests(self):
+        result, urls, report = self._run_mock_benchmark("stampede")
+        self.assertEqual(0, result)
+        self.assertEqual(8, len(urls))  # no warm-up; the first request should miss
+        self.assertEqual(1, len(set(urls)))
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(urls[0]).query)
+        self.assertEqual(["123"], query["benchmark_stampede"])
+        self.assertEqual("stampede", report["mode"])
+        self.assertEqual(8, report["requests_completed"])
 
     def test_non_finite_timeout_is_rejected_before_requests_start(self):
         for timeout in ("nan", "inf", "-inf"):
