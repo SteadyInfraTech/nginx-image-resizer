@@ -41,6 +41,32 @@ def png_dimensions(data):
     return struct.unpack(">II", data[16:24])
 
 
+def webp_dimensions(data):
+    if data[:4] != b"RIFF" or data[8:12] != b"WEBP":
+        raise AssertionError("response is not WebP")
+    position = 12
+    while position + 8 <= len(data):
+        chunk_type = data[position:position + 4]
+        chunk_size = int.from_bytes(data[position + 4:position + 8], "little")
+        payload = data[position + 8:position + 8 + chunk_size]
+        if len(payload) != chunk_size:
+            raise AssertionError("truncated WebP chunk")
+        if chunk_type == b"VP8 " and len(payload) >= 10 and payload[3:6] == b"\x9d\x01\x2a":
+            width = int.from_bytes(payload[6:8], "little") & 0x3fff
+            height = int.from_bytes(payload[8:10], "little") & 0x3fff
+            return width, height
+        if chunk_type == b"VP8L" and len(payload) >= 5 and payload[0] == 0x2f:
+            width = 1 + payload[1] + ((payload[2] & 0x3f) << 8)
+            height = 1 + ((payload[2] & 0xc0) >> 6) + (payload[3] << 2) + ((payload[4] & 0x0f) << 10)
+            return width, height
+        if chunk_type == b"VP8X" and len(payload) >= 10:
+            width = 1 + int.from_bytes(payload[4:7], "little")
+            height = 1 + int.from_bytes(payload[7:10], "little")
+            return width, height
+        position += 8 + chunk_size + (chunk_size & 1)
+    raise AssertionError("WebP dimensions not found")
+
+
 def assert_fits_resize_box(testcase, data, max_width, max_height):
     width, height = png_dimensions(data)
     testcase.assertGreater(width, 0)
@@ -72,6 +98,24 @@ class ImageResizerIntegrationTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("image/png", headers.get("Content-Type", ""))
         assert_fits_resize_box(self, body, 77, 77)
+
+    @unittest.skipUnless(os.environ.get("VALIDATED_ORIGIN") != "1", "optional validator currently supports PNG, JPEG, and GIF only")
+    def test_webp_is_resized_and_cached_when_supported_by_upstream_module(self):
+        path = "/77x77/sample.webp"
+        first_status, first_headers, first_body = request(path)
+        second_status, second_headers, second_body = request(path)
+        self.assertEqual(200, first_status)
+        self.assertEqual(200, second_status)
+        self.assertIn("image/webp", first_headers.get("Content-Type", ""))
+        self.assertEqual("MISS", first_headers.get("X-Cache-Status"))
+        self.assertEqual("HIT", second_headers.get("X-Cache-Status"))
+        width, height = webp_dimensions(first_body)
+        self.assertGreater(width, 0)
+        self.assertGreater(height, 0)
+        self.assertLessEqual(width, 77)
+        self.assertLessEqual(height, 77)
+        self.assertAlmostEqual(width / height, SOURCE_ASPECT_RATIO, delta=0.03)
+        self.assertEqual(first_body, second_body)
 
     def test_proxy_cache_miss_then_hit(self):
         path = "/91x63/sample.png"
