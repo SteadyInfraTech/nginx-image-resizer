@@ -18,13 +18,32 @@ jobs:
         uses: actions/checkout@v4
       - name: Start demo stack with a stable cache TTL
         run: |
+          set -eu
           NGINX_CACHE_VALIDITY=10m docker compose up --build -d nginx origin
-          ready=0
+
+          # NGINX /healthz only confirms that NGINX is running. It does not
+          # prove that the upstream origin has finished starting, so probe the
+          # origin directly before any request can populate a cache entry with
+          # a transient upstream connection failure.
+          origin_ready=0
           for attempt in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:8080/healthz >/dev/null; then ready=1; break; fi
+            if docker compose exec -T origin python -c 'from urllib.request import urlopen; r=urlopen("http://127.0.0.1:8081/sample.png", timeout=1); assert r.status == 200 and r.headers.get_content_type() == "image/png"; r.read(8)' >/dev/null 2>&1; then
+              origin_ready=1
+              break
+            fi
             sleep 1
           done
-          test "$ready" = "1"
+          test "$origin_ready" = "1"
+
+          nginx_ready=0
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/healthz >/dev/null; then
+              nginx_ready=1
+              break
+            fi
+            sleep 1
+          done
+          test "$nginx_ready" = "1"
       - name: Run bounded PR or full scheduled cache and stampede scenarios
         run: |
           set -eu
