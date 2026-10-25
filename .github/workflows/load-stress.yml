@@ -1,6 +1,7 @@
 name: Load stress
 
 on:
+  pull_request:
   schedule:
     - cron: "17 3 * * *"
   workflow_dispatch:
@@ -24,12 +25,12 @@ jobs:
             sleep 1
           done
           test "$ready" = "1"
-      - name: Run 1,000-request cache and stampede scenarios
+      - name: Run bounded PR or full scheduled cache and stampede scenarios
         run: |
           set -eu
           base_url=http://127.0.0.1:8080
           path=/77x77/sample.png
-          requests=1000
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then requests=500; else requests=1000; fi
           concurrency=16
           for mode in hit bypass unique stampede; do
             report="$RUNNER_TEMP/load-$mode.json"
