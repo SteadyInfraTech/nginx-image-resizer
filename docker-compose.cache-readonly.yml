@@ -1,4 +1,0 @@
-services:
-  nginx:
-    volumes:
-      - ./tests/fixtures/cache-readonly:/var/cache/nginx/image:ro
