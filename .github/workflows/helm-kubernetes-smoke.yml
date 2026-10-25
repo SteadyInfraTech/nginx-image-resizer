@@ -28,7 +28,7 @@ jobs:
         run: |
           helm lint charts/nginx-image-resizer
           helm template resizer charts/nginx-image-resizer --set origin.host=origin --set image.tag=ci > "$RUNNER_TEMP/rendered.yaml"
-          grep -q 'image_filter resize' charts/nginx-image-resizer/templates/configmap.yaml
+          grep -q 'image_filter resize' "$RUNNER_TEMP/rendered.yaml"
       - name: Build and load application and test-origin images
         run: |
           docker build -t steady-image-resizer:ci .
