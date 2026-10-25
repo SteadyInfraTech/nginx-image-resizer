@@ -8,6 +8,7 @@ import concurrent.futures
 import json
 import math
 import statistics
+import sys
 import time
 import urllib.error
 import urllib.parse
@@ -76,9 +77,9 @@ def main() -> int:
     parser.add_argument("--timeout", type=float, default=10.0, help="per-request timeout in seconds")
     parser.add_argument(
         "--mode",
-        choices=("hit", "bypass", "unique"),
+        choices=("hit", "bypass", "unique", "stampede"),
         default="hit",
-        help="hit reuses one URL; bypass skips cache; unique varies the query string",
+        help="hit warms and reuses one URL; bypass skips cache; unique varies keys; stampede bursts a cold shared key",
     )
     args = parser.parse_args()
 
@@ -98,6 +99,12 @@ def main() -> int:
 
     base = args.base_url.rstrip("/")
     path = "/" + args.path.lstrip("/")
+    stampede_token = str(time.time_ns()) if args.mode == "stampede" else ""
+    if args.mode == "hit":
+        warmup = request_one(base + path, args.timeout)
+        if warmup.status < 200 or warmup.status >= 300:
+            print(f"warm-up request failed: HTTP {warmup.status}: {warmup.error or 'non-2xx response'}", file=sys.stderr)
+            return 1
     started = time.perf_counter()
 
     def worker(worker_id: int) -> list[Result]:
@@ -108,6 +115,8 @@ def main() -> int:
                 url = add_query_parameter(url, "bypass_cache", "1", replace=True)
             elif args.mode == "unique":
                 url = add_query_parameter(url, "benchmark_request", str(request_id))
+            elif args.mode == "stampede":
+                url = add_query_parameter(url, "benchmark_stampede", stampede_token, replace=True)
             results.append(request_one(url, args.timeout))
         return results
 
