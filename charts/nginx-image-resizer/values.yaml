@@ -20,6 +20,8 @@ serviceAccount:
   create: true
   name: ""
 
+imagePullSecrets: []
+
 podAnnotations: {}
 
 podSecurityContext:
