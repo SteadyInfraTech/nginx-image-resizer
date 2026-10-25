@@ -112,6 +112,10 @@ Optional validated-origin mode:
 NGINX image filter --> private validator :8082 --> fixed image origin :8081
 ```
 
+## Kubernetes + Helm
+
+A minimal Helm chart is available in charts/nginx-image-resizer. It deploys the same NGINX image with a chart-rendered trusted-origin configuration, bounded per-pod cache/temp volumes, non-root/read-only runtime settings, health probes, and a ClusterIP Service. The origin must resolve from the pod before NGINX starts. See [the chart README](charts/nginx-image-resizer/README.md) for installation, resource sizing, cache locality, and image-tag guidance. The chart is tested with Helm lint/render plus a kind install, resize/cache smoke test, and upgrade from one to two replicas.
+
 ## Optional validated-origin mode
 
 The default remains one NGINX process and a fixed trusted origin. To exercise the optional pre-decode dimension gate, use the Compose overlay:
