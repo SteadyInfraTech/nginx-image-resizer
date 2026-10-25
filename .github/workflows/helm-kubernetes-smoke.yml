@@ -33,8 +33,8 @@ jobs:
         run: |
           docker build -t steady-image-resizer:ci .
           docker build -f demo/Dockerfile -t steady-image-resizer-demo-origin:ci .
-          kind load docker-image steady-image-resizer:ci
-          kind load docker-image steady-image-resizer-demo-origin:ci
+          kind load docker-image --name image-resizer steady-image-resizer:ci
+          kind load docker-image --name image-resizer steady-image-resizer-demo-origin:ci
       - name: Install test origin and chart
         run: |
           kubectl create deployment origin --image=steady-image-resizer-demo-origin:ci
