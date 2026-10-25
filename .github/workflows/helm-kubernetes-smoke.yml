@@ -89,4 +89,12 @@ jobs:
             --set replicaCount=2 \
             --wait --timeout=180s
           kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=120s
+          test "$(kubectl get deployment resizer-nginx-image-resizer -o jsonpath='{.spec.replicas}')" = "2"
           curl -fsS http://127.0.0.1:18080/healthz >/dev/null
+
+          # Prove the previous Helm revision can be restored after an upgrade.
+          helm rollback resizer 1 --wait --timeout=180s
+          kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=120s
+          test "$(kubectl get deployment resizer-nginx-image-resizer -o jsonpath='{.spec.replicas}')" = "1"
+          curl -fsS http://127.0.0.1:18080/healthz >/dev/null
+          curl -fsS -o /dev/null http://127.0.0.1:18080/77x77/sample.png
