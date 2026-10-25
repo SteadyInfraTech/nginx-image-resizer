@@ -179,7 +179,7 @@ docker stats --no-stream
 docker compose down
 ```
 
-The scheduled/manual Load Stress workflow also runs 1,000 requests per mode at concurrency 16 and archives the JSON reports. It checks status/cache correctness, not a machine-independent latency target. Repeat at several concurrency levels (for example 1, 4, 8, 16, 32) and record the container memory/CPU from `docker stats`. Use a representative source image and realistic request mix. Do not infer a safe production concurrency limit from a single run or from CI timing; choose limits from sustained measurements and an explicit latency/error budget. The benchmark exits non-zero if requests fail or return a non-2xx status.
+The Load Stress workflow runs 500 requests per mode on pull requests and 1,000 on scheduled/manual runs, at concurrency 16, and archives the JSON reports. It checks status/cache correctness, not a machine-independent latency target. Repeat at several concurrency levels (for example 1, 4, 8, 16, 32) and record the container memory/CPU from `docker stats`. Use a representative source image and realistic request mix. Do not infer a safe production concurrency limit from a single run or from CI timing; choose limits from sustained measurements and an explicit latency/error budget. The benchmark exits non-zero if requests fail or return a non-2xx status.
 
 ## Development
 
