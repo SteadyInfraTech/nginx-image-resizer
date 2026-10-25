@@ -67,6 +67,44 @@ def webp_dimensions(data):
     raise AssertionError("WebP dimensions not found")
 
 
+def gif_dimensions(data):
+    if data[:6] not in (b"GIF87a", b"GIF89a") or len(data) < 10:
+        raise AssertionError("response is not GIF")
+    return struct.unpack("<HH", data[6:10])
+
+
+def jpeg_dimensions(data):
+    if data[:2] != b"\\xff\\xd8":
+        raise AssertionError("response is not JPEG")
+    position = 2
+    sof_markers = {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF}
+    while position + 4 <= len(data):
+        if data[position] != 0xFF:
+            raise AssertionError("invalid JPEG marker")
+        while position < len(data) and data[position] == 0xFF:
+            position += 1
+        if position >= len(data):
+            break
+        marker = data[position]
+        position += 1
+        if marker in (0xD8, 0xD9, 0x01) or 0xD0 <= marker <= 0xD7:
+            continue
+        if position + 2 > len(data):
+            break
+        segment_length = int.from_bytes(data[position:position + 2], "big")
+        if segment_length < 2 or position + segment_length > len(data):
+            raise AssertionError("invalid JPEG segment")
+        if marker in sof_markers:
+            if segment_length < 7:
+                raise AssertionError("invalid JPEG frame")
+            height, width = struct.unpack(">HH", data[position + 3:position + 7])
+            return width, height
+        position += segment_length
+        if marker == 0xDA:
+            break
+    raise AssertionError("JPEG dimensions not found")
+
+
 def assert_fits_resize_box(testcase, data, max_width, max_height):
     width, height = png_dimensions(data)
     testcase.assertGreater(width, 0)
@@ -98,6 +136,36 @@ class ImageResizerIntegrationTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("image/png", headers.get("Content-Type", ""))
         assert_fits_resize_box(self, body, 77, 77)
+
+    def test_jpeg_is_resized_and_cached(self):
+        path = "/77x77/sample.jpg"
+        first_status, first_headers, first_body = request(path)
+        second_status, second_headers, second_body = request(path)
+        self.assertEqual(200, first_status)
+        self.assertEqual(200, second_status)
+        self.assertIn("image/jpeg", first_headers.get("Content-Type", ""))
+        self.assertEqual("MISS", first_headers.get("X-Cache-Status"))
+        self.assertEqual("HIT", second_headers.get("X-Cache-Status"))
+        width, height = jpeg_dimensions(first_body)
+        self.assertLessEqual(width, 77)
+        self.assertLessEqual(height, 77)
+        self.assertAlmostEqual(width / height, SOURCE_ASPECT_RATIO, delta=0.03)
+        self.assertEqual(first_body, second_body)
+
+    def test_gif_is_resized_and_cached(self):
+        path = "/77x77/sample.gif"
+        first_status, first_headers, first_body = request(path)
+        second_status, second_headers, second_body = request(path)
+        self.assertEqual(200, first_status)
+        self.assertEqual(200, second_status)
+        self.assertIn("image/gif", first_headers.get("Content-Type", ""))
+        self.assertEqual("MISS", first_headers.get("X-Cache-Status"))
+        self.assertEqual("HIT", second_headers.get("X-Cache-Status"))
+        width, height = gif_dimensions(first_body)
+        self.assertLessEqual(width, 77)
+        self.assertLessEqual(height, 77)
+        self.assertAlmostEqual(width / height, SOURCE_ASPECT_RATIO, delta=0.03)
+        self.assertEqual(first_body, second_body)
 
     @unittest.skipUnless(os.environ.get("VALIDATED_ORIGIN") != "1", "optional validator currently supports PNG, JPEG, and GIF only")
     def test_webp_is_resized_and_cached_when_supported_by_upstream_module(self):
