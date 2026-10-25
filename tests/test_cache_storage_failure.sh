@@ -15,6 +15,19 @@ trap on_error ERR
 
 NGINX_CACHE_VALIDITY=10m NGINX_CACHE_TMPFS_SIZE=512k NGINX_HOST_PORT=18080 docker compose up --build -d nginx origin
 
+# NGINX /healthz only proves that the proxy process is running. The test is
+# specifically about cache-write failures, so first ensure the upstream is
+# serving valid images; otherwise startup races can produce unrelated 415s.
+origin_ready=0
+for attempt in $(seq 1 30); do
+  if docker compose exec -T origin python -c 'from urllib.request import urlopen; r=urlopen("http://127.0.0.1:8081/sample.png", timeout=1); assert r.status == 200 and r.headers.get_content_type() == "image/png"; r.read(8)' >/dev/null 2>&1; then
+    origin_ready=1
+    break
+  fi
+  sleep 1
+done
+test "$origin_ready" = "1"
+
 base_url="http://127.0.0.1:18080"
 ready=0
 for attempt in $(seq 1 30); do
