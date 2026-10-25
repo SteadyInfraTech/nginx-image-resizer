@@ -1,4 +1,5 @@
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import base64
 from urllib.parse import parse_qs, urlsplit
 import struct
 import threading
@@ -29,6 +30,9 @@ def make_oversized_png():
 
 
 PNG = make_png()
+JPEG = base64.b64decode("/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDADUlKC8oITUvKy88OTU/UIVXUElJUKN1e2GFwarLyL6qurfV8P//1eL/5re6////////////zv//////////////2wBDATk8PFBGUJ1XV53/3Lrc////////////////////////////////////////////////////////////////////wAARCAAYACADASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAP/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAT/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCYChOAAAAAA//Z")
+GIF = base64.b64decode("R0lGODdhQAHwAIEAABh4yAAAAAAAAAAAACwAAAAAQAHwAEAI/wABCBxIsKDBgwgTKlzIsKHDhxAjSpxIsaLFixgzatzIsaPHjyBDihxJsqTJkyhTqlzJsqXLlzBjypxJs6bNmzhz6tzJs6fPn0CDCh1KtKjRo0iTKl3KtKnTp1CjSp1KtarVq1izat3KtavXr2DDih1LtqzZs2jTql3Ltq3bt3Djyp1Lt67du3jz6t3Lt6/fv4ADCx5MuLDhw4gTK17MuLHjx5AjS55MubLly5gza97MubPnz6BDix5NurTp06hTq17NurXr17Bjy55Nu7bt27hz697Nu7fv38CDCx9OvLjx48iTK1/OvLnz59CjS59Ovbr169iza9/Ovbv37+DDi84fT768+fPo06tfz769+/fw48ufT7++/fv48+vfz7+///8ABijggAQWaOCBCCao4IIMNujggxBGKOGEFFZo4YUYZqjhhhx26OGHIIYo4ogklmjiiSimqOKKLLbo4oswxijjjDTWaOONOOao44489ujjj0AGKeSQRBZp5JFIJqnkkkw26eSTUEYp5ZRUVmnllVhmqeWWXHbp5ZdghinmmGSWaeaZaKap5ppstunmm3DGKeecdNZp55145qnnnnz26eefgAYq6KCEFmrooaQFBAA7")
+WEBP = base64.b64decode("UklGRl4AAABXRUJQVlA4IFIAAAAQBgCdASpkAEsAPxGIwFmsKSajoOgBgCIJaQZwZoF4AEuAA9KSxGcQBgEShMHpwnTikgJ0YE6MCXAA/tom/+pO89j7//iF3shqG1G+O6LioAAA")
 PNG_VERSION_2 = make_png(color=(196, 82, 59))
 CORRUPT_PNG = b"\x89PNG\r\n\x1a\n" + b"not-a-valid-png-chunk"
 OVERSIZED_PNG = make_oversized_png()
@@ -89,6 +93,27 @@ class Handler(BaseHTTPRequestHandler):
                     else PNG_VERSION_2)
             self.send_response(200)
             self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif parsed.path == "/sample.jpg":
+            body = JPEG
+            self.send_response(200)
+            self.send_header("Content-Type", "image/jpeg")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif parsed.path == "/sample.gif":
+            body = GIF
+            self.send_response(200)
+            self.send_header("Content-Type", "image/gif")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif parsed.path == "/sample.webp":
+            body = WEBP
+            self.send_response(200)
+            self.send_header("Content-Type", "image/webp")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)

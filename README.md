@@ -6,7 +6,7 @@ On-demand image resizing with NGINX, using a simple URL format:
 /77x77/path/to/image.png
 ```
 
-NGINX fetches an original image from a fixed upstream, resizes it, and caches the transformed response. The default setup is designed to run behind a load balancer or reverse proxy that handles public HTTPS.
+NGINX fetches an original image from a fixed, trusted upstream, resizes it, and caches the transformed response. The default request path is one NGINX process; an optional validated-origin mode is available for deployments that need a pre-decode dimension gate. The default setup is designed to run behind a load balancer or reverse proxy that handles public HTTPS.
 
 > **Status:** Reference implementation. CI covers the HTTP request path and cache behavior; deployment-specific performance and security validation are still required.
 
@@ -29,7 +29,7 @@ curl -i http://localhost:8080/77x77/sample.png
 docker compose down
 ```
 
-The demo origin serves synthetic PNG fixtures; no external image host is needed.
+The demo origin serves synthetic PNG fixtures; no external image host is needed. The default Compose stack uses the single-process NGINX path; optional validation is tested separately.
 
 ## Runtime hardening
 
@@ -77,6 +77,10 @@ The mounted directory must contain `tls.crt` and `tls.key`. Build with `NGINX_PU
 
 Use an existing Docker network in place of `your-private-network` (or create it as shown above). Attach the origin container/service to that same network with the network alias `origin` and port `8081`; the resizer must join the network as well so `origin:8081` resolves from inside its container. If the origin is managed by Compose, configure the shared network and alias there rather than creating a second origin container. Avoid publishing the origin or loopback transformer.
 
+## Upstream NGINX build
+
+The container is based on the official NGINX Open Source Alpine image, pinned to the `1.30.6` release tag, which packages the matching dynamic image-filter module. The build fails if the expected module file is absent, and CI validates the actual configuration with the module loaded. Keep NGINX and the module version aligned when updating the base image.
+
 ## Request contract
 
 - Request format: `/{width}x{height}/{origin-relative-path}`.
@@ -92,24 +96,36 @@ Use an existing Docker network in place of `your-private-network` (or create it 
 
 ## Network and request flow
 
-NGINX serves the edge on port `8080` and a transformer on `127.0.0.1:8082`. The transformer fetches originals through a separate, private validator service. The validator reads bounded encoded bytes and parses PNG/GIF/JPEG dimensions before NGINX image_filter decodes pixels; only validated source bytes reach the transformer. The edge caches resized response bytes.
+The default deployment uses one NGINX process: it fetches originals from the fixed trusted origin, applies `image_filter`, and caches resized response bytes. An optional validator service can be placed between NGINX and the origin when a deployment needs a header-based dimension gate; this adds another service and supports PNG/GIF/JPEG only.
 
 ```text
 Client / load balancer
         |
         v
-NGINX edge :8080 -- cache hit --> return cached image
-        |
-        | cache miss
-        v
-NGINX transformer 127.0.0.1:8082
-        |
-        v
-Private dimension validator :8082
-        |
-        v
-Fixed image origin :8081
+NGINX :8080 -- cache hit --> return cached image
+    |
+    | cache miss
+    v
+Fixed trusted image origin :8081
+
+Optional validated-origin mode:
+NGINX image filter --> private validator :8082 --> fixed image origin :8081
 ```
+
+## Kubernetes + Helm
+
+A minimal Helm chart is available in charts/nginx-image-resizer. It deploys the same NGINX image with a chart-rendered trusted-origin configuration, bounded per-pod cache/temp volumes, non-root/read-only runtime settings, health probes, and a ClusterIP Service. The origin must resolve from the pod before NGINX starts. See [the chart README](charts/nginx-image-resizer/README.md) for installation, resource sizing, cache locality, and image-tag guidance. The chart is tested with Helm lint/render plus a kind install, resize/cache smoke test, and upgrade from one to two replicas.
+
+## Optional validated-origin mode
+
+The default remains one NGINX process and a fixed trusted origin. To exercise the optional pre-decode dimension gate, use the Compose overlay:
+
+```sh
+docker compose -f docker-compose.yml -f docker-compose.validated.yml up --build --abort-on-container-exit --exit-code-from tests
+docker compose -f docker-compose.yml -f docker-compose.validated.yml down --volumes --remove-orphans
+```
+
+This mode adds a private Python service that reads bounded origin responses and checks PNG/GIF/JPEG headers before NGINX decodes pixels. It is opt-in because it adds another runtime dependency and does not constitute a complete decoder sandbox.
 
 ## CI coverage
 
@@ -118,8 +134,8 @@ The integration suite checks resize dimensions and aspect ratio, cache MISS then
 ## Limitations
 
 - The image-filter module is separate and depends on GD; package availability and module paths vary by distribution.
-- The validator accepts PNG, JPEG, and GIF headers only. The demo tests PNG; it makes no claims about WebP, AVIF, animated-image semantics, or metadata/profile preservation.
-- Transformations consume CPU and memory. The private validator caps encoded source bytes at 8 MiB, source dimensions at 8192 per side, and source pixels at 16,777,216 by default. It parses PNG/GIF/JPEG headers without decoding pixels and rejects unknown, malformed, oversized, or over-pixel-limit inputs before they reach NGINX image_filter. These defaults are configurable through the validator service environment. This reduces decompression-bomb exposure but does not eliminate parser vulnerabilities, all malformed-file risks, or memory pressure from accepted images; retain OS/container memory limits and tune concurrency. The direct-TLS example requires `NGINX_MEMORY_LIMIT`.
+- The official NGINX image-filter module transforms JPEG, GIF, PNG, and WebP when the module and underlying GD build support the format. WebP must be verified against the actual built image. AVIF and HEIC are not promised.
+- Transformations consume CPU and memory. `image_filter_buffer 8M` caps encoded source bytes, not decoded pixel allocation. The default trusted-origin mode does not protect against a malicious origin returning a tiny file with extreme dimensions. Keep the origin trusted and constrained, set runtime memory limits, and tune concurrency. Optional validated-origin mode adds a lightweight PNG/GIF/JPEG header parser with defaults of 8 MiB encoded bytes, 8192 per side, and 16,777,216 pixels; it reduces one risk but is not a full decoder sandbox and does not support every format. The direct-TLS example requires `NGINX_MEMORY_LIMIT`.
 - Arbitrary sizes can fragment the cache; dimension bounds reduce but do not eliminate this.
 - Updating an original at the same path does not automatically invalidate cached variants. Use a versioned URL/query or wait for expiry; there is no purge API.
 - CI uses a one-second TTL override for stale-on-503 testing; the default image retains a ten-minute TTL. Timeout behavior, sustained origin failure, high-load behavior, TLS renewal, and load-balancer integration need deployment-specific testing.

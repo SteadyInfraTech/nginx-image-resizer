@@ -1,0 +1,106 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "nginx-image-resizer.fullname" . }}-config
+  labels:
+    {{- include "nginx-image-resizer.labels" . | nindent 4 }}
+data:
+  nginx.conf: |
+    load_module /usr/lib/nginx/modules/ngx_http_image_filter_module.so;
+
+    worker_processes auto;
+    pid /run/nginx/nginx.pid;
+
+    events {
+        worker_connections {{ .Values.nginx.workerConnections }};
+    }
+
+    http {
+        include /etc/nginx/mime.types;
+        default_type application/octet-stream;
+        client_body_temp_path /var/lib/nginx/tmp/client_body;
+        proxy_temp_path /var/lib/nginx/tmp/proxy;
+        fastcgi_temp_path /var/lib/nginx/tmp/fastcgi;
+        uwsgi_temp_path /var/lib/nginx/tmp/uwsgi;
+        scgi_temp_path /var/lib/nginx/tmp/scgi;
+        access_log /dev/stdout;
+        error_log /dev/stderr notice;
+
+        map $arg_bypass_cache $skip_image_cache {
+            default 0;
+            1       1;
+            true    1;
+            yes     1;
+        }
+
+        limit_conn_zone $server_name zone=image_requests:1m;
+
+        proxy_cache_path /var/cache/nginx/image levels=1:2 keys_zone=image_cache:10m
+            max_size={{ .Values.nginx.cache.maxSize }} inactive={{ .Values.nginx.cache.inactive }} use_temp_path=off;
+
+        upstream image_origin {
+            server {{ .Values.origin.host }}:{{ .Values.origin.port }};
+            keepalive 8;
+        }
+
+        server {
+            listen 8080;
+            server_name _;
+
+            location = /healthz {
+                access_log off;
+                return 200 "ok\n";
+            }
+
+            location ~ ^/(?<edge_width>[1-9][0-9]?[0-9]?|1[0-9][0-9][0-9]|20[0-3][0-9]|204[0-8])x(?<edge_height>[1-9][0-9]?[0-9]?|1[0-9][0-9][0-9]|20[0-3][0-9]|204[0-8])/(?<edge_image_path>.+)$ {
+                if ($edge_image_path ~ "(^|/)\\.\\.?(/|$)") { return 400; }
+
+                limit_conn image_requests {{ .Values.nginx.maxConcurrentImageRequests }};
+                limit_conn_status 503;
+
+                proxy_cache image_cache;
+                proxy_cache_key "$scheme$proxy_host$uri$is_args$args";
+                proxy_cache_bypass $skip_image_cache;
+                proxy_no_cache $skip_image_cache;
+                proxy_cache_valid 200 {{ .Values.nginx.cache.validity }};
+                proxy_cache_lock on;
+                proxy_cache_lock_timeout 10s;
+                proxy_cache_use_stale error timeout updating http_500 http_502 http_503 http_504;
+
+                add_header X-Cache-Status $upstream_cache_status always;
+                proxy_set_header Host $host;
+                proxy_connect_timeout 2s;
+                proxy_read_timeout 5s;
+                proxy_pass http://127.0.0.1:8082;
+            }
+
+            location / { return 400; }
+        }
+
+        server {
+            listen 127.0.0.1:8082;
+            server_name _;
+            access_log off;
+            error_log /dev/stderr notice;
+
+            location ~ ^/(?<width>[1-9][0-9]?[0-9]?|1[0-9][0-9][0-9]|20[0-3][0-9]|204[0-8])x(?<height>[1-9][0-9]?[0-9]?|1[0-9][0-9][0-9]|20[0-3][0-9]|204[0-8])/(?<image_path>.+)$ {
+                if ($image_path ~ "(^|/)\\.\\.?(/|$)") { return 400; }
+
+                image_filter resize $width $height;
+                image_filter_buffer {{ .Values.nginx.imageFilter.buffer }};
+                proxy_intercept_errors on;
+                error_page 404 = @origin_not_found;
+                error_page 503 = @origin_unavailable;
+                proxy_pass_request_headers off;
+                proxy_set_header Accept "image/webp, image/png, image/jpeg, image/gif";
+                proxy_set_header Host {{ .Values.origin.host }};
+                proxy_connect_timeout 2s;
+                proxy_read_timeout 5s;
+                proxy_pass http://image_origin/$image_path$is_args$args;
+            }
+
+            location @origin_not_found { return 404; }
+            location @origin_unavailable { return 503; }
+            location / { return 400; }
+        }
+    }

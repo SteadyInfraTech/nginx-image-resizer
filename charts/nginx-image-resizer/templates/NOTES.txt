@@ -1,0 +1,4 @@
+NGINX Image Resizer is available through Service {{ include "nginx-image-resizer.fullname" . }} on port {{ .Values.service.port }}.
+
+The configured trusted origin is {{ .Values.origin.host }}:{{ .Values.origin.port }}.
+For production, pin image.tag to a release version or image.digest to an immutable digest.
