@@ -1,4 +1,5 @@
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import base64
 from urllib.parse import parse_qs, urlsplit
 import struct
 import threading
@@ -29,6 +30,7 @@ def make_oversized_png():
 
 
 PNG = make_png()
+WEBP = base64.b64decode("UklGRj4BAABXRUJQVlA4IDIBAADQHwCdASpAAfAAPm02mkmkIyKhICgAgA2JaW7f8C9AvAH6Afv/Ke00B+AALzoQKKdXVL8p6inV1S8Yl4x0dBoDxjo6DQHjHR0GgPGOjoNAeMdHQaA8Y6Og0B4x0dBoDxjo6DQHjHR0GgPGOjoNAeMdHQaA8Y6Og0B4x0dBoDxjo6DQHjHR0GgPGOjoNAeMdHQaA8Y6Og0B4x0dBoDxjo6DQHjHR0GgPGOjoNAeMdHQaA8Y6Og0B4x0dBoDxjo6DQHjHR0GgPGOjoNAeMdHQaA8Y6Og0B4x0dBoDxjo6DQHjHR0GgPGOjKAAD+6/a//+cSx1O7uz//+dgtVZvuuF9AQJIkSJEiRIkSJEiRIkSI6c4oAAA=")
 PNG_VERSION_2 = make_png(color=(196, 82, 59))
 CORRUPT_PNG = b"\x89PNG\r\n\x1a\n" + b"not-a-valid-png-chunk"
 OVERSIZED_PNG = make_oversized_png()
@@ -89,6 +91,13 @@ class Handler(BaseHTTPRequestHandler):
                     else PNG_VERSION_2)
             self.send_response(200)
             self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif parsed.path == "/sample.webp":
+            body = WEBP
+            self.send_response(200)
+            self.send_header("Content-Type", "image/webp")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
