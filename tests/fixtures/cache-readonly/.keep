@@ -1,1 +1,0 @@
-This directory is mounted read-only over the NGINX cache path in the cache-failure test.
