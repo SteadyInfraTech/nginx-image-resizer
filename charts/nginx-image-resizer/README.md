@@ -2,6 +2,8 @@
 
 This chart deploys the trusted-origin, single-NGINX-process request path. It does not deploy an image origin or the optional validator service.
 
+**New to the chart?** Follow the [15-minute Kubernetes quickstart](../../docs/kubernetes-quickstart.md) to install into a cluster, verify a resized response and cache HIT, and understand how application traffic must be routed.
+
 ## Install
 
 The origin must be reachable over HTTP from the pod before NGINX starts. By default the chart expects a Kubernetes Service named origin in the same namespace on port 8081.
