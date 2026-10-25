@@ -27,20 +27,16 @@ spec:
     spec:
       serviceAccountName: {{ include "nginx-image-resizer.serviceAccountName" . }}
       automountServiceAccountToken: false
-      {{- with .Values.imagePullSecrets }}
+      {{ with .Values.imagePullSecrets }}
       imagePullSecrets:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
+        {{ toYaml . | nindent 8 }}
+      {{ end }}
       terminationGracePeriodSeconds: 30
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
         - name: nginx
-          {{- if .Values.image.digest }}
-          image: {{ printf "%s@%s" .Values.image.repository .Values.image.digest }}
-          {{- else }}
-          image: {{ printf "%s:%s" .Values.image.repository .Values.image.tag }}
-          {{- end }}
+          image: {{ if .Values.image.digest }}{{ printf "%s@%s" .Values.image.repository .Values.image.digest }}{{ else }}{{ printf "%s:%s" .Values.image.repository .Values.image.tag }}{{ end }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["nginx"]
           args: ["-g", "daemon off;"]
