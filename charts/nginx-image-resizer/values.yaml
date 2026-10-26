@@ -1,5 +1,8 @@
 replicaCount: 2
 
+# URI contract: prefix (/77x77/path.jpg) or suffix (/path.jpg/_resize/77x77).
+uriStyle: prefix
+
 image:
   repository: ghcr.io/steadyinfratech/nginx-image-resizer
   # "main" is for pre-release development. Pin a version tag or digest for releases.

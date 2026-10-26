@@ -6,7 +6,7 @@ This chart deploys the trusted-origin, single-NGINX-process request path. It doe
 
 ## Install
 
-The origin must be reachable over HTTP from the pod before NGINX starts. By default the chart expects a Kubernetes Service named origin in the same namespace on port 8081.
+The origin must be reachable over HTTP from the pod before NGINX starts. By default the chart expects a Kubernetes Service named origin in the same namespace on port 8081. URI routing defaults to `uriStyle: prefix` (`/77x77/products/item.png`). Set `--set uriStyle=suffix` to use `/products/item.png/_resize/77x77`; only the selected style is enabled.
 
     helm upgrade --install image-resizer ./charts/nginx-image-resizer \
       --set origin.host=origin.default.svc.cluster.local \

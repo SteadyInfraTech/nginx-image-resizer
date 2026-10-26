@@ -7,8 +7,10 @@ ARG NGINX_PUBLIC_HOST=localhost
 ARG NGINX_ORIGIN_UPSTREAM=origin:8081
 
 COPY ${NGINX_CONFIG} /etc/nginx/nginx.conf
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 RUN set -eu; \
+    chmod 755 /usr/local/bin/docker-entrypoint.sh; \
     printf "%s" "${NGINX_MAX_CONCURRENT_IMAGE_REQUESTS}" | grep -Eq "^[1-9][0-9]*$" || { echo "NGINX_MAX_CONCURRENT_IMAGE_REQUESTS must be a positive integer" >&2; exit 1; }; \
     printf "%s" "${NGINX_CACHE_VALIDITY}" | grep -Eq "^[0-9]+(ms|s|m|h|d|w|M|y)$" || { echo "NGINX_CACHE_VALIDITY must be a single NGINX time value, e.g. 10m or 1s" >&2; exit 1; }; \
     printf "%s" "${NGINX_ORIGIN_UPSTREAM}" | grep -Eq "^[A-Za-z0-9.-]+:[0-9]{1,5}$" || { echo "NGINX_ORIGIN_UPSTREAM must be a hostname:port pair" >&2; exit 1; }; \
@@ -25,4 +27,5 @@ RUN set -eu; \
     sed -i "s/server origin:8081;/server ${NGINX_ORIGIN_UPSTREAM};/; s/proxy_cache_valid 200 10m;/proxy_cache_valid 200 ${NGINX_CACHE_VALIDITY};/; s/limit_conn image_requests 16;/limit_conn image_requests ${NGINX_MAX_CONCURRENT_IMAGE_REQUESTS};/" /etc/nginx/nginx.conf
 
 EXPOSE 80 443 8080
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["nginx", "-g", "daemon off;"]

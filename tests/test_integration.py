@@ -9,6 +9,17 @@ from urllib.request import Request, urlopen
 BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:8080")
 ORIGIN_CONTROL_URL = os.environ.get("ORIGIN_CONTROL_URL", "http://127.0.0.1:8081")
 SOURCE_ASPECT_RATIO = 4 / 3
+URI_STYLE = os.environ.get("URI_STYLE", "prefix")
+
+
+def selected_uri(path):
+    """Translate canonical prefix paths into the configured public URI style."""
+    if URI_STYLE not in ("prefix", "suffix"):
+        raise RuntimeError("URI_STYLE must be prefix or suffix")
+    if URI_STYLE == "suffix":
+        import re
+        path = re.sub(r"^/(\d+)x(\d+)(/[^?]+)", r"\3/_resize/\1x\2", path)
+    return path
 
 
 def set_stale_sample_origin_status(status):
@@ -27,7 +38,7 @@ def request(path, headers=None):
     request_headers = {"User-Agent": "steady-image-resizer-tests/1"}
     if headers:
         request_headers.update(headers)
-    req = Request(BASE_URL + path, headers=request_headers)
+    req = Request(BASE_URL + selected_uri(path), headers=request_headers)
     try:
         with urlopen(req, timeout=10) as response:
             return response.status, response.headers, response.read()
@@ -130,6 +141,12 @@ class ImageResizerIntegrationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         wait_for_service()
+
+    def test_uri_style_configuration_is_supported(self):
+        self.assertIn(URI_STYLE, ("prefix", "suffix"))
+        status, _, body = request("/77x77/sample.png?uri-style-contract=1")
+        self.assertEqual(status, 200)
+        assert_fits_resize_box(self, body, 77, 77)
 
     def test_resize_fits_requested_dimensions_and_returns_png(self):
         status, headers, body = request("/77x77/sample.png")

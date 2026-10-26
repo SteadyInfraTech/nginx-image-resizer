@@ -12,6 +12,8 @@ services:
         NGINX_CONFIG: nginx.conf
         NGINX_CACHE_VALIDITY: ${NGINX_CACHE_VALIDITY:-1s}
         NGINX_ORIGIN_UPSTREAM: ${NGINX_ORIGIN_UPSTREAM:-origin:8081}
+    environment:
+      NGINX_URI_STYLE: ${NGINX_URI_STYLE:-prefix}
     ports: ["${NGINX_HOST_PORT:-8080}:8080"]
     depends_on: [origin]
     # Keep the image filesystem immutable at runtime. NGINX needs writable
@@ -39,6 +41,7 @@ services:
     environment:
       BASE_URL: http://nginx:8080
       ORIGIN_CONTROL_URL: http://origin:8081
+      URI_STYLE: ${NGINX_URI_STYLE:-prefix}
     depends_on:
       nginx:
         condition: service_healthy
