@@ -370,6 +370,23 @@ class ImageResizerIntegrationTests(unittest.TestCase):
         status, _, _ = request("/77x77/origin-unavailable.png")
         self.assertEqual(503, status)
 
+    @unittest.skipIf(os.environ.get("VALIDATED_ORIGIN") == "1", "the optional validator has a separate timeout path")
+    def test_origin_read_timeout_is_bounded_and_service_recovers(self):
+        # Use a unique URL so stale cache fallback cannot hide the upstream timeout.
+        started = time.monotonic()
+        status, headers, _ = request("/77x77/slow-timeout.png?case=timeout-recovery")
+        elapsed = time.monotonic() - started
+        self.assertEqual(504, status)
+        self.assertLess(elapsed, 9.0, f"upstream timeout was not bounded: {elapsed:.2f}s")
+
+        # A timed-out upstream request must not poison the worker or subsequent requests.
+        recovered_status, recovered_headers, recovered_body = request(
+            "/77x77/sample.png?case=after-timeout-recovery"
+        )
+        self.assertEqual(200, recovered_status)
+        self.assertEqual("MISS", recovered_headers.get("X-Cache-Status"))
+        assert_fits_resize_box(self, recovered_body, 77, 77)
+
     def test_corrupt_image_returns_unsupported_media_error(self):
         status, _, _ = request("/77x77/corrupt.png")
         self.assertEqual(415, status)
