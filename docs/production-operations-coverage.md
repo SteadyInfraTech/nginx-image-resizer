@@ -39,7 +39,7 @@ This matrix distinguishes automated checks from deployment-specific validation. 
 
 ## Follow-up priorities
 
-1. Exercise readiness/liveness failure and rolling upgrade with no ready endpoints in kind.
+1. Exercise a rolling upgrade under an intentionally failing revision and verify the default strategy preserves ready Service endpoints; do not claim coverage for deployment-specific overrides that can remove all endpoints.
 2. Revisit resource-limit/OOM automation only when the test harness can make the outcome deterministic; keep performance thresholds measurement-based.
 
 Update this matrix whenever a test or workflow changes. Keep README statements aligned with the actual checks and retain deployment-specific caveats for conditions CI cannot realistically reproduce.
