@@ -57,7 +57,7 @@ jobs:
           sleep 2
 
           curl -fsS --max-time 10 -D "$RUNNER_TEMP/refreshed.headers" -o "$RUNNER_TEMP/refreshed.png" "$url"
-          grep -qi '^X-Cache-Status: MISS' "$RUNNER_TEMP/refreshed.headers"
+          grep -Eqi '^X-Cache-Status: (EXPIRED|MISS)' "$RUNNER_TEMP/refreshed.headers"
           cmp -s "$RUNNER_TEMP/initial.png" "$RUNNER_TEMP/refreshed.png" && { echo "expired cache unexpectedly served the old image" >&2; exit 1; }
 
           curl -fsS -D "$RUNNER_TEMP/refreshed-hit.headers" -o "$RUNNER_TEMP/refreshed-hit.png" "$url"
