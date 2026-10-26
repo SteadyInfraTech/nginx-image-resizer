@@ -4,6 +4,7 @@
   "required": ["replicaCount", "image", "origin", "service", "nginx"],
   "properties": {
     "replicaCount": {"type": "integer", "minimum": 1},
+    "uriStyle": {"type": "string", "enum": ["prefix", "suffix"]},
     "image": {
       "type": "object",
       "required": ["repository", "tag", "digest", "pullPolicy"],
