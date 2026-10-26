@@ -131,7 +131,7 @@ This mode adds a private Python service that reads bounded origin responses and 
 
 ## CI coverage
 
-The integration suite checks resize dimensions and aspect ratio, cache MISS then HIT, cache bypass without storage, versioned cache keys, invalid dimensions, path traversal attempts, missing origin objects, upstream 503 preservation, corrupt and non-image payloads, oversized originals, concurrent same-key and distinct transformations, overload rejection when concurrent image requests exceed the configured cap, and stale-cache fallback when the origin returns 503 after expiry. CI also exercises direct-TLS resizing and cache behavior under the hardened container runtime flags.
+The integration suite checks resize dimensions and aspect ratio, cache MISS then HIT, cache bypass without storage, versioned cache keys, invalid dimensions, path traversal attempts, missing origin objects, upstream 503 preservation, bounded upstream read-timeout behavior followed by a successful recovery request, corrupt and non-image payloads, oversized originals, concurrent same-key and distinct transformations, overload rejection when concurrent image requests exceed the configured cap, and stale-cache fallback when the origin returns 503 after expiry. CI also exercises direct-TLS resizing and cache behavior under the hardened container runtime flags.
 
 ## Limitations
 
@@ -140,7 +140,7 @@ The integration suite checks resize dimensions and aspect ratio, cache MISS then
 - Transformations consume CPU and memory. `image_filter_buffer 8M` caps encoded source bytes, not decoded pixel allocation. The default trusted-origin mode does not protect against a malicious origin returning a tiny file with extreme dimensions. Keep the origin trusted and constrained, set runtime memory limits, and tune concurrency. Optional validated-origin mode adds a lightweight PNG/GIF/JPEG header parser with defaults of 8 MiB encoded bytes, 8192 per side, and 16,777,216 pixels; it reduces one risk but is not a full decoder sandbox and does not support every format. The direct-TLS example requires `NGINX_MEMORY_LIMIT`.
 - Arbitrary sizes can fragment the cache; dimension bounds reduce but do not eliminate this.
 - Updating an original at the same path does not automatically invalidate cached variants. Use a versioned URL/query or wait for expiry; there is no purge API.
-- CI uses a one-second TTL override for stale-on-503 testing; the default image retains a ten-minute TTL. Timeout behavior, sustained origin failure, high-load behavior, TLS renewal, and load-balancer integration need deployment-specific testing.
+- CI uses a one-second TTL override for stale-on-503 testing; the default image retains a ten-minute TTL. Sustained origin failure, TLS renewal, and load-balancer integration need deployment-specific testing; the CI timeout fixture verifies the configured read-timeout path against a slow origin.
 - The cache is local to each instance; replicas do not share cache contents automatically.
 - This is not a full image CDN or media platform. Advanced codecs, cropping, focal points, authorization, purge APIs, and global delivery are out of scope.
 
