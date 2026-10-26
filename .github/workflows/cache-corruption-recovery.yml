@@ -53,10 +53,10 @@ jobs:
           assert struct.unpack(">II", data[16:24]) == (77, 57), "first response dimensions unexpected"
           PY
 
-          cache_file="$(docker compose exec -T -u 0 nginx sh -ec 'find /var/cache/nginx/image -type f -print -quit')"
+          cache_file="$(docker compose exec -T -u 101:101 nginx sh -ec 'find /var/cache/nginx/image -type f -print -quit')"
           test -n "$cache_file"
           # Deliberately destroy the cache file after the valid MISS populated it.
-          docker compose exec -T -u 0 nginx sh -ec "printf 'corrupted-cache-entry' > '$cache_file'"
+          docker compose exec -T -u 101:101 nginx sh -ec "printf 'corrupted-cache-entry' > '$cache_file'"
 
           curl -fsS --max-time 10 -D "$RUNNER_TEMP/recovered.headers" -o "$RUNNER_TEMP/recovered.png" "$url"
           grep -qi '^X-Cache-Status: MISS' "$RUNNER_TEMP/recovered.headers"
