@@ -49,7 +49,7 @@ data:
 
             location = /healthz {
                 access_log off;
-                return 200 "ok\n";
+                return 200 "ok\\n";
             }
 
             {{ if eq .Values.uriStyle "prefix" }}
@@ -57,7 +57,7 @@ data:
             {{ else }}
             location ~ ^/(?<edge_image_path>.+)/_resize/(?<edge_width>[1-9][0-9]?[0-9]?|1[0-9][0-9][0-9]|20[0-3][0-9]|204[0-8])x(?<edge_height>[1-9][0-9]?[0-9]?|1[0-9][0-9][0-9]|20[0-3][0-9]|204[0-8])$ {
             {{ end }}
-                if ($request_uri ~* "(%2e|%252e|\\.){2}(%2f|/|%252f|\\?|$)") { return 400; }
+                if ($request_uri ~* "(%2e|%252e|\\\\.){2}(%2f|/|%252f|\\\\?|$)") { return 400; }
                 if ($edge_image_path ~ "(^|/)\\.\\.?(/|$)") { return 400; }
 
                 limit_conn image_requests {{ .Values.nginx.maxConcurrentImageRequests }};
@@ -100,6 +100,9 @@ data:
                 proxy_intercept_errors on;
                 error_page 404 = @origin_not_found;
                 error_page 503 = @origin_unavailable;
+                # Keep plain-text transport errors away from image_filter and preserve their status.
+                error_page 502 = @origin_bad_gateway;
+                error_page 504 = @origin_gateway_timeout;
                 proxy_pass_request_headers off;
                 proxy_set_header Accept "image/webp, image/png, image/jpeg, image/gif";
                 proxy_set_header Host {{ .Values.origin.host }};
@@ -110,6 +113,8 @@ data:
 
             location @origin_not_found { return 404; }
             location @origin_unavailable { return 503; }
+            location @origin_bad_gateway { return 502; }
+            location @origin_gateway_timeout { return 504; }
             location / { return 400; }
         }
     }
