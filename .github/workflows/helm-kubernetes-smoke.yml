@@ -170,6 +170,37 @@ jobs:
           test "$(kubectl get deployment resizer-nginx-image-resizer -o jsonpath='{.status.readyReplicas}')" = "2"
           echo "pod replacement smoke passed: 10 image requests succeeded while one replica was deleted"
 
+          # Exercise the no-ready-endpoint state explicitly. Scaling to zero is
+          # deterministic in kind and verifies that the Service has no stale
+          # endpoints, then that traffic recovers when replicas return. This is
+          # endpoint outage/recovery coverage, not a substitute for a rolling
+          # upgrade test with no ready endpoints.
+          kubectl scale deployment/resizer-nginx-image-resizer --replicas=0
+          kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=120s
+          endpoints_empty=0
+          for attempt in $(seq 1 30); do
+            endpoint_ips="$(kubectl get endpoints resizer-nginx-image-resizer -o jsonpath='{.subsets[*].addresses[*].ip}')"
+            if [ -z "$endpoint_ips" ]; then endpoints_empty=1; break; fi
+            sleep 1
+          done
+          test "$endpoints_empty" = "1"
+          echo "Service correctly has no ready endpoints at zero replicas."
+          kubectl scale deployment/resizer-nginx-image-resizer --replicas=2
+          kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=180s
+          test "$(kubectl get deployment resizer-nginx-image-resizer -o jsonpath='{.status.readyReplicas}')" = "2"
+          # Assert EndpointSlice/Service discovery is populated and exercise the
+          # actual in-cluster Service DNS path, not kubectl port-forward (which
+          # selects a pod and can bypass the Service data path).
+          endpoint_ips=""
+          for attempt in $(seq 1 30); do
+            endpoint_ips="$(kubectl get endpoints resizer-nginx-image-resizer -o jsonpath='{.subsets[*].addresses[*].ip}')"
+            if [ -n "$endpoint_ips" ]; then break; fi
+            sleep 1
+          done
+          test -n "$endpoint_ips"
+          kubectl exec deployment/origin -- python -c "import struct; from urllib.request import urlopen; data=urlopen('http://resizer-nginx-image-resizer:8080/77x77/sample.png?zero-endpoint-recovery=1', timeout=10).read(); assert data[:8] == bytes.fromhex('89504e470d0a1a0a'), 'response is not PNG'; width,height=struct.unpack('>II', data[16:24]); assert (width,height)==(77,57), f'unexpected dimensions: {width}x{height}'"
+          echo "Service routing recovered after zero-endpoint interval"
+
           # Prove the previous Helm revision can be restored after an upgrade.
           helm rollback resizer 1 --wait --timeout=180s
           kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=120s
