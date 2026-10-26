@@ -84,7 +84,7 @@ The default request contract is `/{width}x{height}/{origin-relative-path}`. For 
 To put it into an application path:
 
 1. Configure an existing Ingress controller, gateway, or load balancer to forward the desired image-resize route to the `nginx-image-resizer` Service on port 8080.
-2. Change your image URL template or application integration to request the resize prefix, such as `/77x77/`, unless your existing URLs already follow this contract.
+2. Change your image URL template or application integration to use the selected URI style: the default `/77x77/` prefix or the optional `/_resize/77x77` suffix. Existing URLs are not rewritten automatically.
 3. Keep the origin and resizer Service private to trusted cluster/network paths. Terminate public TLS at your existing ingress or load balancer.
 4. Test source-not-found, origin errors, cache behavior, and representative image sizes before directing production traffic.
 
