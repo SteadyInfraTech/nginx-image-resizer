@@ -31,6 +31,33 @@ jobs:
         if: always()
         run: docker compose down --volumes --remove-orphans
 
+  suffix-uri-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Verify invalid URI style is rejected at build time
+        run: |
+          if docker build --build-arg NGINX_URI_STYLE=invalid -t image-resizer-invalid-uri-style .; then
+            echo "invalid URI style unexpectedly built successfully" >&2
+            exit 1
+          fi
+      - name: Build and run suffix-style integration tests
+        env:
+          NGINX_URI_STYLE: suffix
+        run: docker compose up --build --abort-on-container-exit --exit-code-from tests
+      - name: Show logs on failure
+        if: failure()
+        env:
+          NGINX_URI_STYLE: suffix
+        run: docker compose logs --no-color
+      - name: Clean up
+        if: always()
+        env:
+          NGINX_URI_STYLE: suffix
+        run: docker compose down --volumes --remove-orphans
+
   validated-input-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 10
