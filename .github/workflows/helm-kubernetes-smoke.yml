@@ -100,7 +100,7 @@ jobs:
           assert (width, height) == (77, 57), f"unexpected dimensions: {width}x{height}"
           print(f"kind smoke passed: {width}x{height}, cache miss/hit verified")
           PY
-          checksum_before_uri_change="$(kubectl get deployment resizer-nginx-image-resizer -o jsonpath='{.spec.template.metadata.annotations.checksum/config}')"
+          checksum_before_uri_change="$(kubectl get deployment resizer-nginx-image-resizer -o jsonpath='{.spec.template.metadata.annotations['checksum/config']}')"
           helm upgrade resizer charts/nginx-image-resizer \
             --set image.repository=steady-image-resizer \
             --set image.tag=ci \
@@ -109,7 +109,7 @@ jobs:
             --set uriStyle=suffix \
             --set replicaCount=1 \
             --wait --timeout=180s
-          checksum_after_uri_change="$(kubectl get deployment resizer-nginx-image-resizer -o jsonpath='{.spec.template.metadata.annotations.checksum/config}')"
+          checksum_after_uri_change="$(kubectl get deployment resizer-nginx-image-resizer -o jsonpath='{.spec.template.metadata.annotations['checksum/config']}')"
           test -n "$checksum_before_uri_change"
           test -n "$checksum_after_uri_change"
           test "$checksum_before_uri_change" != "$checksum_after_uri_change"
