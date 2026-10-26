@@ -79,7 +79,7 @@ If the origin returns a different source image, the output dimensions will diffe
 
 ## Route application traffic
 
-The request contract is `/{width}x{height}/{origin-relative-path}`. For example, `/77x77/products/item.png` asks the resizer to fetch `/products/item.png` from the configured origin and return a resized image.
+The default request contract is `/{width}x{height}/{origin-relative-path}`. For example, `/77x77/products/item.png` asks the resizer to fetch `/products/item.png` from the configured origin and return a resized image. To select the alternative suffix form, install with `--set uriStyle=suffix` and request `/products/item.png/_resize/77x77`. The chart accepts only the configured style; the default remains `prefix`.
 
 To put it into an application path:
 
