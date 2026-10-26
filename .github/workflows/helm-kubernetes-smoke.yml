@@ -100,6 +100,7 @@ jobs:
           assert (width, height) == (77, 57), f"unexpected dimensions: {width}x{height}"
           print(f"kind smoke passed: {width}x{height}, cache miss/hit verified")
           PY
+          checksum_before_uri_change="$(kubectl get deployment resizer-nginx-image-resizer -o jsonpath='{.spec.template.metadata.annotations.checksum/config}')"
           helm upgrade resizer charts/nginx-image-resizer \
             --set image.repository=steady-image-resizer \
             --set image.tag=ci \
@@ -108,7 +109,12 @@ jobs:
             --set uriStyle=suffix \
             --set replicaCount=1 \
             --wait --timeout=180s
+          checksum_after_uri_change="$(kubectl get deployment resizer-nginx-image-resizer -o jsonpath='{.spec.template.metadata.annotations.checksum/config}')"
+          test -n "$checksum_before_uri_change"
+          test -n "$checksum_after_uri_change"
+          test "$checksum_before_uri_change" != "$checksum_after_uri_change"
           kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=120s
+          echo "ConfigMap checksum changed and rollout completed after URI-style update."
           start_port_forward
           curl -fsS -D "$RUNNER_TEMP/suffix-first.headers" -o "$RUNNER_TEMP/suffix.png" http://127.0.0.1:18080/sample.png/_resize/77x77
           grep -qi '^X-Cache-Status: MISS' "$RUNNER_TEMP/suffix-first.headers"
@@ -126,6 +132,28 @@ jobs:
           start_port_forward
           test "$(kubectl get deployment resizer-nginx-image-resizer -o jsonpath='{.spec.replicas}')" = "2"
           curl -fsS http://127.0.0.1:18080/healthz >/dev/null
+
+          # Verify that the two replicas maintain independent local caches. Contact each
+          # pod directly so Service load balancing cannot mask replica-local behavior.
+          for pod in $(kubectl get pods -l app.kubernetes.io/instance=resizer,app.kubernetes.io/name=nginx-image-resizer -o jsonpath='{.items[*].metadata.name}'); do
+            kubectl port-forward "pod/$pod" 18081:8080 > "$RUNNER_TEMP/port-forward-$pod.log" 2>&1 &
+            pod_port_forward_pid=$!
+            pod_ready=0
+            for attempt in $(seq 1 30); do
+              if curl -fsS http://127.0.0.1:18081/healthz >/dev/null; then pod_ready=1; break; fi
+              sleep 1
+            done
+            test "$pod_ready" = "1"
+            locality_url="http://127.0.0.1:18081/77x77/sample.png?replica-locality=$GITHUB_RUN_ID"
+            curl -fsS -D "$RUNNER_TEMP/$pod-locality-first.headers" -o "$RUNNER_TEMP/$pod-locality-first.png" "$locality_url"
+            grep -qi '^X-Cache-Status: MISS' "$RUNNER_TEMP/$pod-locality-first.headers"
+            curl -fsS -D "$RUNNER_TEMP/$pod-locality-second.headers" -o "$RUNNER_TEMP/$pod-locality-second.png" "$locality_url"
+            grep -qi '^X-Cache-Status: HIT' "$RUNNER_TEMP/$pod-locality-second.headers"
+            cmp "$RUNNER_TEMP/$pod-locality-first.png" "$RUNNER_TEMP/$pod-locality-second.png"
+            kill "$pod_port_forward_pid" 2>/dev/null || true
+            wait "$pod_port_forward_pid" 2>/dev/null || true
+            echo "Replica-local cache MISS/HIT verified on $pod"
+          done
 
           # Delete one serving pod and prove the Service still handles new
           # requests through the surviving replica while Kubernetes replaces it.
