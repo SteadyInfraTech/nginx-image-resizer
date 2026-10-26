@@ -18,7 +18,7 @@ def selected_uri(path):
         raise RuntimeError("URI_STYLE must be prefix or suffix")
     if URI_STYLE == "suffix":
         import re
-        path = re.sub(r"^/(\\d+)x(\\d+)(/[^?]+)", r"\\3/_resize/\\1x\\2", path)
+        path = re.sub(r"^/(\d+)x(\d+)(/[^?]+)", r"\3/_resize/\1x\2", path)
     return path
 
 
