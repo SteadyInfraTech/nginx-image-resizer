@@ -9,7 +9,7 @@ This matrix distinguishes automated checks from deployment-specific validation. 
 | Normal resize, format, dimensions, URI contract | `tests/test_integration.py` | `CI` | Prefix and suffix route variants; format support depends on the built image-filter module. |
 | Cache MISS/HIT, bypass, versioned variants, header/cache-poisoning defenses | `tests/test_integration.py` | `CI` | Verifies response status, cache headers and bodies. |
 | Invalid dimensions, traversal, missing object, corrupt/non-image payload, oversized encoded source | `tests/test_integration.py` | `CI` | Covers request and origin payload failure paths. |
-| Origin HTTP 503 and stale response after expiry | `tests/test_integration.py`, `tests/cache-expiry-refresh.yml` workflow | `CI`, Cache expiry/refresh | Stale fallback is tested with a short TTL override; default TTL is ten minutes. |
+| Origin HTTP 503 and stale response after expiry | `tests/test_integration.py` and `.github/workflows/cache-expiry-refresh.yml` | `CI`, Cache expiry/refresh | Stale fallback is tested with a short TTL override; default TTL is ten minutes. |
 | Origin read timeout and service recovery | `tests/test_integration.py` | `CI` | Bounded timeout plus a subsequent successful request; not a sustained-outage test. |
 | Origin connection refused / unreachable origin recovery | No dedicated deterministic test yet | Not covered | Add an automated test before treating this failure mode as covered. |
 | Corrupt cache entry recovery | Cache corruption recovery test | Cache corruption recovery | Verifies that a bad cached object can be recovered instead of served as a valid image. |
