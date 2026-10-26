@@ -116,7 +116,7 @@ NGINX image filter --> private validator :8082 --> fixed image origin :8081
 
 ## Kubernetes + Helm
 
-A minimal Helm chart is available in charts/nginx-image-resizer. It deploys the same NGINX image with a chart-rendered trusted-origin configuration, bounded per-pod cache/temp volumes, non-root/read-only runtime settings, health probes, and a ClusterIP Service. The origin must resolve from the pod before NGINX starts. See [the chart README](charts/nginx-image-resizer/README.md) for installation, resource sizing, cache locality, and image-tag guidance. The chart is tested with Helm lint/render plus a kind install, resize/cache smoke test, and upgrade from one to two replicas.
+A minimal Helm chart is available in charts/nginx-image-resizer. It deploys the same NGINX image with a chart-rendered trusted-origin configuration, bounded per-pod cache/temp volumes, non-root/read-only runtime settings, health probes, and a ClusterIP Service. The origin must resolve from the pod before NGINX starts. See [the chart README](charts/nginx-image-resizer/README.md) for installation, resource sizing, cache locality, and image-tag guidance. The chart is tested with Helm lint/render, assertions for hardened runtime settings and health probes, a kind install, resize/cache smoke tests, pod replacement while serving requests, scaling, upgrade, and rollback.
 
 ## Optional validated-origin mode
 
@@ -131,7 +131,7 @@ This mode adds a private Python service that reads bounded origin responses and 
 
 ## CI coverage
 
-The integration suite checks resize dimensions and aspect ratio, cache MISS then HIT, cache bypass without storage, versioned cache keys, invalid dimensions, path traversal attempts, missing origin objects, upstream 503 preservation, corrupt and non-image payloads, oversized originals, concurrent same-key and distinct transformations, overload rejection when concurrent image requests exceed the configured cap, and stale-cache fallback when the origin returns 503 after expiry. CI also exercises direct-TLS resizing and cache behavior under the hardened container runtime flags.
+The integration suite checks resize dimensions and aspect ratio, cache MISS then HIT, cache bypass without storage, versioned cache keys, invalid dimensions, path traversal attempts, missing origin objects, upstream 503 preservation, corrupt and non-image payloads, oversized originals, concurrent same-key and distinct transformations, overload rejection when concurrent image requests exceed the configured cap, and stale-cache fallback when the origin returns 503 after expiry. CI also exercises direct-TLS resizing and cache behavior under the hardened container runtime flags. The kind workflow deletes one serving pod at two replicas and verifies that ten fresh resize requests still succeed through the Service before the replacement pod becomes ready.
 
 ## Limitations
 
