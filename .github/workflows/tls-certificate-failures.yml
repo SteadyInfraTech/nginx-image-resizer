@@ -1,0 +1,70 @@
+name: TLS certificate failure modes
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tls-certificate-failures:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Generate valid and mismatched certificate material
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/tls-valid" "$RUNNER_TEMP/tls-mismatch" "$RUNNER_TEMP/tls-missing"
+          openssl req -x509 -nodes -newkey rsa:2048 -days 1 \
+            -keyout "$RUNNER_TEMP/tls-valid/tls.key" \
+            -out "$RUNNER_TEMP/tls-valid/tls.crt" -subj "/CN=localhost"
+          openssl req -x509 -nodes -newkey rsa:2048 -days 1 \
+            -keyout "$RUNNER_TEMP/tls-mismatch/other.key" \
+            -out "$RUNNER_TEMP/tls-mismatch/other.crt" -subj "/CN=other.example"
+          cp "$RUNNER_TEMP/tls-valid/tls.crt" "$RUNNER_TEMP/tls-mismatch/tls.crt"
+          cp "$RUNNER_TEMP/tls-mismatch/other.key" "$RUNNER_TEMP/tls-mismatch/tls.key"
+          sudo chown root:root "$RUNNER_TEMP"/tls-valid/* "$RUNNER_TEMP"/tls-mismatch/*
+          sudo chmod 600 "$RUNNER_TEMP/tls-valid/tls.key" "$RUNNER_TEMP/tls-mismatch/tls.key" "$RUNNER_TEMP/tls-mismatch/other.key"
+          sudo chmod 644 "$RUNNER_TEMP/tls-valid/tls.crt" "$RUNNER_TEMP/tls-mismatch/tls.crt" "$RUNNER_TEMP/tls-mismatch/other.crt"
+      - name: Build direct-TLS image
+        run: docker build --build-arg NGINX_CONFIG=nginx-direct-tls.conf -t steady-nginx-image-resizer:tls-failure .
+      - name: Assert invalid certificate material fails closed
+        shell: bash
+        run: |
+          set -euo pipefail
+          image=steady-nginx-image-resizer:tls-failure
+          run_nginx_test() {
+            local mount_dir="$1"
+            docker run --rm \
+              --read-only \
+              --cap-drop ALL --cap-add CHOWN --cap-add SETUID --cap-add SETGID --cap-add NET_BIND_SERVICE \
+              --security-opt no-new-privileges:true \
+              --tmpfs /run/nginx:rw,noexec,nosuid,size=1m,mode=0755 \
+              --tmpfs /var/lib/nginx/tmp:rw,noexec,nosuid,size=16m,mode=1777 \
+              --tmpfs /var/cache/nginx:rw,noexec,nosuid,size=96m,mode=1777 \
+              --tmpfs /tmp:rw,noexec,nosuid,size=16m,mode=1777 \
+              -v "$mount_dir:/etc/nginx/tls:ro" "$image" nginx -t
+          }
+
+          if run_nginx_test "$RUNNER_TEMP/tls-missing"; then
+            echo "missing TLS certificate/key unexpectedly passed nginx -t" >&2
+            exit 1
+          fi
+          if run_nginx_test "$RUNNER_TEMP/tls-mismatch"; then
+            echo "mismatched TLS certificate/key unexpectedly passed nginx -t" >&2
+            exit 1
+          fi
+
+          # The runtime drops DAC_OVERRIDE, so a root-owned mode-000 key must be unreadable.
+          sudo chmod 000 "$RUNNER_TEMP/tls-valid/tls.key"
+          if run_nginx_test "$RUNNER_TEMP/tls-valid"; then
+            echo "unreadable TLS private key unexpectedly passed nginx -t" >&2
+            exit 1
+          fi
+          echo "TLS failure modes passed: missing, mismatched, and unreadable key material all fail closed"
