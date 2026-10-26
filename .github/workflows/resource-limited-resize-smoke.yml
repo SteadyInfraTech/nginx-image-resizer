@@ -29,13 +29,21 @@ jobs:
       - name: Start bounded resizer and origin
         run: |
           set -eu
+          compose="docker compose -f docker-compose.yml -f $RUNNER_TEMP/limits.yml"
           NGINX_CACHE_VALIDITY=10m NGINX_CACHE_TMPFS_SIZE=32m docker compose -f docker-compose.yml -f "$RUNNER_TEMP/limits.yml" up --build -d nginx origin
+          origin_ready=0
           for attempt in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:8080/healthz >/dev/null; then break; fi
+            if docker compose exec -T origin python -c 'from urllib.request import urlopen; r=urlopen("http://127.0.0.1:8081/sample.png", timeout=1); assert r.status == 200; r.read(8)' >/dev/null 2>&1; then origin_ready=1; break; fi
             sleep 1
           done
-          curl -fsS http://127.0.0.1:8080/healthz >/dev/null
-          docker inspect nginx --format '{{.HostConfig.Memory}} {{.HostConfig.MemorySwap}} {{.HostConfig.NanoCpus}}' | grep -qx '134217728 134217728 500000000'
+          test "$origin_ready" = "1"
+          nginx_ready=0
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/healthz >/dev/null; then nginx_ready=1; break; fi
+            sleep 1
+          done
+          test "$nginx_ready" = "1"
+          docker inspect "$(docker compose -f docker-compose.yml -f "$RUNNER_TEMP/limits.yml" ps -q nginx)" --format '{{.HostConfig.Memory}} {{.HostConfig.MemorySwap}} {{.HostConfig.NanoCpus}}' | grep -qx '134217728 134217728 500000000'
       - name: Resize cold variants under the resource cap
         run: |
           python3 - <<'PY'
@@ -57,8 +65,8 @@ jobs:
           print("80 cold transformations passed at concurrency 8 under 128 MiB and 0.5 CPU limits")
           PY
           curl -fsS http://127.0.0.1:8080/healthz >/dev/null
-          test "$(docker inspect nginx --format '{{.State.Running}}')" = true
-          test "$(docker inspect nginx --format '{{.State.OOMKilled}}')" = false
+          test "$(docker inspect "$(docker compose -f docker-compose.yml -f "$RUNNER_TEMP/limits.yml" ps -q nginx)" --format '{{.State.Running}}')" = true
+          test "$(docker inspect "$(docker compose -f docker-compose.yml -f "$RUNNER_TEMP/limits.yml" ps -q nginx)" --format '{{.State.OOMKilled}}')" = false
       - name: Diagnostics on failure
         if: failure()
         run: |
