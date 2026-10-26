@@ -29,10 +29,16 @@ jobs:
           helm lint charts/nginx-image-resizer
           helm template resizer charts/nginx-image-resizer --set origin.host=origin --set image.tag=ci > "$RUNNER_TEMP/rendered.yaml"
           grep -q 'image_filter resize' "$RUNNER_TEMP/rendered.yaml"
+          grep -q 'runAsNonRoot: true' "$RUNNER_TEMP/rendered.yaml"
+          grep -q 'readOnlyRootFilesystem: true' "$RUNNER_TEMP/rendered.yaml"
+          grep -q 'allowPrivilegeEscalation: false' "$RUNNER_TEMP/rendered.yaml"
+          grep -q 'startupProbe:' "$RUNNER_TEMP/rendered.yaml"
+          grep -q 'readinessProbe:' "$RUNNER_TEMP/rendered.yaml"
+          grep -q 'livenessProbe:' "$RUNNER_TEMP/rendered.yaml"
           helm template resizer charts/nginx-image-resizer --set origin.host=origin --set image.tag=ci --set uriStyle=suffix > "$RUNNER_TEMP/rendered-suffix.yaml"
           grep -q '/_resize/' "$RUNNER_TEMP/rendered-suffix.yaml"
           if helm template resizer charts/nginx-image-resizer --set uriStyle=invalid > /dev/null 2>&1; then echo "invalid uriStyle unexpectedly passed schema validation" >&2; exit 1; fi
-          if grep -q '^ *location ~ \^/(?<edge_width>.*edge_image_path' "$RUNNER_TEMP/rendered-suffix.yaml"; then echo "prefix route unexpectedly rendered for suffix style" >&2; exit 1; fi
+          if grep -q '^ *location ~ \\^/(?<edge_width>.*edge_image_path' "$RUNNER_TEMP/rendered-suffix.yaml"; then echo "prefix route unexpectedly rendered for suffix style" >&2; exit 1; fi
       - name: Build and load application and test-origin images
         run: |
           docker build -t steady-image-resizer:ci .
@@ -44,11 +50,11 @@ jobs:
           kubectl create deployment origin --image=steady-image-resizer-demo-origin:ci
           kubectl expose deployment origin --port=8081 --target-port=8081
           kubectl rollout status deployment/origin --timeout=120s
-          helm upgrade --install resizer charts/nginx-image-resizer \
-            --set image.repository=steady-image-resizer \
-            --set image.tag=ci \
-            --set image.pullPolicy=IfNotPresent \
-            --set origin.host=origin \
+          helm upgrade --install resizer charts/nginx-image-resizer \\
+            --set image.repository=steady-image-resizer \\
+            --set image.tag=ci \\
+            --set image.pullPolicy=IfNotPresent \\
+            --set origin.host=origin \\
             --set replicaCount=1
           kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=120s
       - name: Diagnose Kubernetes startup failures
@@ -59,7 +65,7 @@ jobs:
           kubectl describe pods || true
           kubectl logs deployment/resizer-nginx-image-resizer --all-containers=true --tail=200 || true
           kubectl logs deployment/origin --all-containers=true --tail=100 || true
-      - name: Verify resize, cache hit, and Helm upgrade
+      - name: Verify resize, cache hit, upgrade, pod recovery, and rollback
         run: |
           set -eu
           port_forward_pid=""
@@ -90,13 +96,13 @@ jobs:
           assert (width, height) == (77, 57), f"unexpected dimensions: {width}x{height}"
           print(f"kind smoke passed: {width}x{height}, cache miss/hit verified")
           PY
-          helm upgrade resizer charts/nginx-image-resizer \
-            --set image.repository=steady-image-resizer \
-            --set image.tag=ci \
-            --set image.pullPolicy=IfNotPresent \
-            --set origin.host=origin \
-            --set uriStyle=suffix \
-            --set replicaCount=1 \
+          helm upgrade resizer charts/nginx-image-resizer \\
+            --set image.repository=steady-image-resizer \\
+            --set image.tag=ci \\
+            --set image.pullPolicy=IfNotPresent \\
+            --set origin.host=origin \\
+            --set uriStyle=suffix \\
+            --set replicaCount=1 \\
             --wait --timeout=180s
           kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=120s
           start_port_forward
@@ -105,21 +111,40 @@ jobs:
           curl -fsS -D "$RUNNER_TEMP/suffix-second.headers" -o "$RUNNER_TEMP/suffix-again.png" http://127.0.0.1:18080/sample.png/_resize/77x77
           grep -qi '^X-Cache-Status: HIT' "$RUNNER_TEMP/suffix-second.headers"
           cmp "$RUNNER_TEMP/suffix.png" "$RUNNER_TEMP/suffix-again.png"
-          helm upgrade resizer charts/nginx-image-resizer \
-            --set image.repository=steady-image-resizer \
-            --set image.tag=ci \
-            --set image.pullPolicy=IfNotPresent \
-            --set origin.host=origin \
-            --set replicaCount=2 \
+          helm upgrade resizer charts/nginx-image-resizer \\
+            --set image.repository=steady-image-resizer \\
+            --set image.tag=ci \\
+            --set image.pullPolicy=IfNotPresent \\
+            --set origin.host=origin \\
+            --set replicaCount=2 \\
             --wait --timeout=180s
           kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=180s
           start_port_forward
           test "$(kubectl get deployment resizer-nginx-image-resizer -o jsonpath='{.spec.replicas}')" = "2"
           curl -fsS http://127.0.0.1:18080/healthz >/dev/null
 
+          # Delete one serving pod and prove the Service still handles new
+          # requests through the surviving replica while Kubernetes replaces it.
+          victim="$(kubectl get pods -l app.kubernetes.io/instance=resizer,app.kubernetes.io/name=nginx-image-resizer -o jsonpath='{.items[0].metadata.name}')"
+          test -n "$victim"
+          kubectl delete pod "$victim" --wait=false
+          for request_id in $(seq 1 10); do
+            curl -fsS -o "$RUNNER_TEMP/recovery-$request_id.png" "http://127.0.0.1:18080/77x77/sample.png?pod-recovery=$request_id"
+            python3 - "$RUNNER_TEMP/recovery-$request_id.png" <<'PY'
+          import struct, sys
+          data = open(sys.argv[1], "rb").read()
+          assert data[:8] == bytes.fromhex("89504e470d0a1a0a"), "response is not PNG"
+          width, height = struct.unpack(">II", data[16:24])
+          assert (width, height) == (77, 57), f"unexpected dimensions: {width}x{height}"
+          PY
+          done
+          kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=180s
+          test "$(kubectl get deployment resizer-nginx-image-resizer -o jsonpath='{.status.readyReplicas}')" = "2"
+          echo "pod replacement smoke passed: 10 image requests succeeded while one replica was deleted"
+
           # Prove the previous Helm revision can be restored after an upgrade.
           helm rollback resizer 1 --wait --timeout=180s
-          kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=180s
+          kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=120s
           start_port_forward
           test "$(kubectl get deployment resizer-nginx-image-resizer -o jsonpath='{.spec.replicas}')" = "1"
           curl -fsS http://127.0.0.1:18080/healthz >/dev/null
