@@ -24,6 +24,7 @@ This matrix distinguishes automated checks from deployment-specific validation. 
 | Cache locality across replicas | Helm/kind smoke contacts each pod directly | Helm Kubernetes smoke | A unique URL must be a MISS then HIT on each of two pods, showing each pod owns an independent cache. This does not assert a particular cache hit ratio through the load-balanced Service. |
 | ConfigMap change triggers a rollout | Helm/kind smoke compares the pod-template config checksum before and after a URI-style ConfigMap change, then waits for rollout | Helm Kubernetes smoke | Confirms a changed rendered NGINX config changes the pod template and completes a rollout. |
 | Kubernetes readiness/liveness failure injection | Helm/kind smoke temporarily points probes at a missing health path, checks readiness withdrawal and liveness-triggered container restart, then restores the probes | Helm Kubernetes smoke | Confirms the failed-readiness pod is excluded from endpoints and liveness restarts a bad pod while existing ready replicas remain available. |
+| Failed rolling-upgrade revision preserves Service capacity | Helm/kind smoke changes the Deployment to an unpullable image, asserts at least two ready Service endpoints and a successful in-cluster resize, then restores the known-good Helm revision | Helm Kubernetes smoke | Exercises the default `maxUnavailable: 0`, `maxSurge: 1` strategy under a stalled/broken new revision; deployment-specific strategy overrides are not covered. |
 
 ## Deployment-specific validation
 
@@ -35,11 +36,10 @@ This matrix distinguishes automated checks from deployment-specific validation. 
 | Production-scale throughput, latency and cache working-set behavior | Shared CI runners cannot provide stable performance baselines. | Run repeatable benchmarks on a recorded host, with resource limits and a representative request mix. |
 | Network policy and origin/transformer isolation | Chart smoke tests do not prove the surrounding cluster's policies. | Confirm the origin is private, only the intended Service is exposed, and NetworkPolicy/firewall rules match the deployment. |
 | Zero-ready-endpoint outage and recovery | Helm/kind smoke scales the Deployment to zero, verifies the Service endpoint list is empty, scales back to two replicas, and checks a valid resize response. | Helm Kubernetes smoke | Exercises explicit endpoint withdrawal and recovery, but is not a rolling-upgrade simulation. |
-| Rolling upgrade when no endpoints are ready | CI now injects readiness/liveness failures and verifies old ready replicas remain available, but it does not force a rolling upgrade into a zero-ready-endpoint state. The chart uses `maxUnavailable: 0` and `maxSurge: 1` to avoid that condition under normal rolling updates. | Test any deployment-specific override of the rollout strategy in a controlled cluster; retain the default strategy and its availability guarantees. |
+| Rolling upgrade with a broken new revision or deployment-specific strategy overrides | CI now injects a non-pullable image during a rolling update and verifies at least two old Service endpoints plus a successful image request remain available, then restores the healthy revision. The chart uses `maxUnavailable: 0` and `maxSurge: 1`. | Validate any deployment-specific override of the rollout strategy in a controlled cluster; retain the default strategy and its availability guarantees. |
 
 ## Follow-up priorities
 
-1. Exercise a rolling upgrade under an intentionally failing revision and verify the default strategy preserves ready Service endpoints; do not claim coverage for deployment-specific overrides that can remove all endpoints.
-2. Revisit resource-limit/OOM automation only when the test harness can make the outcome deterministic; keep performance thresholds measurement-based.
+1. Revisit resource-limit/OOM automation only when the test harness can make the outcome deterministic; keep performance thresholds measurement-based.
 
 Update this matrix whenever a test or workflow changes. Keep README statements aligned with the actual checks and retain deployment-specific caveats for conditions CI cannot realistically reproduce.
