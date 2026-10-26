@@ -52,7 +52,11 @@ data:
                 return 200 "ok\n";
             }
 
+            {{ if eq .Values.uriStyle "prefix" }}
             location ~ ^/(?<edge_width>[1-9][0-9]?[0-9]?|1[0-9][0-9][0-9]|20[0-3][0-9]|204[0-8])x(?<edge_height>[1-9][0-9]?[0-9]?|1[0-9][0-9][0-9]|20[0-3][0-9]|204[0-8])/(?<edge_image_path>.+)$ {
+            {{ else }}
+            location ~ ^/(?<edge_image_path>.+)/_resize/(?<edge_width>[1-9][0-9]?[0-9]?|1[0-9][0-9][0-9]|20[0-3][0-9]|204[0-8])x(?<edge_height>[1-9][0-9]?[0-9]?|1[0-9][0-9][0-9]|20[0-3][0-9]|204[0-8])$ {
+            {{ end }}
                 if ($edge_image_path ~ "(^|/)\\.\\.?(/|$)") { return 400; }
 
                 limit_conn image_requests {{ .Values.nginx.maxConcurrentImageRequests }};
@@ -83,7 +87,11 @@ data:
             access_log off;
             error_log /dev/stderr notice;
 
+            {{ if eq .Values.uriStyle "prefix" }}
             location ~ ^/(?<width>[1-9][0-9]?[0-9]?|1[0-9][0-9][0-9]|20[0-3][0-9]|204[0-8])x(?<height>[1-9][0-9]?[0-9]?|1[0-9][0-9][0-9]|20[0-3][0-9]|204[0-8])/(?<image_path>.+)$ {
+            {{ else }}
+            location ~ ^/(?<image_path>.+)/_resize/(?<width>[1-9][0-9]?[0-9]?|1[0-9][0-9][0-9]|20[0-3][0-9]|204[0-8])x(?<height>[1-9][0-9]?[0-9]?|1[0-9][0-9][0-9]|20[0-3][0-9]|204[0-8])$ {
+            {{ end }}
                 if ($image_path ~ "(^|/)\\.\\.?(/|$)") { return 400; }
 
                 image_filter resize $width $height;
