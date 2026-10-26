@@ -29,6 +29,10 @@ jobs:
           helm lint charts/nginx-image-resizer
           helm template resizer charts/nginx-image-resizer --set origin.host=origin --set image.tag=ci > "$RUNNER_TEMP/rendered.yaml"
           grep -q 'image_filter resize' "$RUNNER_TEMP/rendered.yaml"
+          grep -q 'error_page 502 = @origin_bad_gateway;' "$RUNNER_TEMP/rendered.yaml"
+          grep -q 'error_page 504 = @origin_gateway_timeout;' "$RUNNER_TEMP/rendered.yaml"
+          grep -q 'location @origin_bad_gateway { return 502; }' "$RUNNER_TEMP/rendered.yaml"
+          grep -q 'location @origin_gateway_timeout { return 504; }' "$RUNNER_TEMP/rendered.yaml"
           grep -q 'runAsNonRoot: true' "$RUNNER_TEMP/rendered.yaml"
           grep -q 'readOnlyRootFilesystem: true' "$RUNNER_TEMP/rendered.yaml"
           grep -q 'allowPrivilegeEscalation: false' "$RUNNER_TEMP/rendered.yaml"
