@@ -89,6 +89,20 @@ jobs:
             --set image.tag=ci \
             --set image.pullPolicy=IfNotPresent \
             --set origin.host=origin \
+            --set uriStyle=suffix \
+            --set replicaCount=1 \
+            --wait --timeout=180s
+          kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=120s
+          curl -fsS -D "$RUNNER_TEMP/suffix-first.headers" -o "$RUNNER_TEMP/suffix.png" http://127.0.0.1:18080/sample.png/_resize/77x77
+          grep -qi '^X-Cache-Status: MISS' "$RUNNER_TEMP/suffix-first.headers"
+          curl -fsS -D "$RUNNER_TEMP/suffix-second.headers" -o "$RUNNER_TEMP/suffix-again.png" http://127.0.0.1:18080/sample.png/_resize/77x77
+          grep -qi '^X-Cache-Status: HIT' "$RUNNER_TEMP/suffix-second.headers"
+          cmp "$RUNNER_TEMP/suffix.png" "$RUNNER_TEMP/suffix-again.png"
+          helm upgrade resizer charts/nginx-image-resizer \
+            --set image.repository=steady-image-resizer \
+            --set image.tag=ci \
+            --set image.pullPolicy=IfNotPresent \
+            --set origin.host=origin \
             --set replicaCount=2 \
             --wait --timeout=180s
           kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=120s
