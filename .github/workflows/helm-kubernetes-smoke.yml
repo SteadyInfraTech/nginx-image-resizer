@@ -62,16 +62,21 @@ jobs:
       - name: Verify resize, cache hit, and Helm upgrade
         run: |
           set -eu
-          kubectl port-forward service/resizer-nginx-image-resizer 18080:8080 > "$RUNNER_TEMP/port-forward.log" 2>&1 &
-          port_forward_pid=$!
-          cleanup() { kill "$port_forward_pid" 2>/dev/null || true; }
+          port_forward_pid=""
+          start_port_forward() {
+            if [ -n "$port_forward_pid" ]; then kill "$port_forward_pid" 2>/dev/null || true; fi
+            kubectl port-forward service/resizer-nginx-image-resizer 18080:8080 > "$RUNNER_TEMP/port-forward.log" 2>&1 &
+            port_forward_pid=$!
+            ready=0
+            for attempt in $(seq 1 30); do
+              if curl -fsS http://127.0.0.1:18080/healthz >/dev/null; then ready=1; break; fi
+              sleep 1
+            done
+            test "$ready" = "1"
+          }
+          cleanup() { if [ -n "$port_forward_pid" ]; then kill "$port_forward_pid" 2>/dev/null || true; fi; }
           trap cleanup EXIT
-          ready=0
-          for attempt in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:18080/healthz >/dev/null; then ready=1; break; fi
-            sleep 1
-          done
-          test "$ready" = "1"
+          start_port_forward
           curl -fsS -D "$RUNNER_TEMP/first.headers" -o "$RUNNER_TEMP/resized.png" http://127.0.0.1:18080/77x77/sample.png
           grep -qi '^X-Cache-Status: MISS' "$RUNNER_TEMP/first.headers"
           curl -fsS -D "$RUNNER_TEMP/second.headers" -o "$RUNNER_TEMP/resized-again.png" http://127.0.0.1:18080/77x77/sample.png
@@ -94,6 +99,7 @@ jobs:
             --set replicaCount=1 \
             --wait --timeout=180s
           kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=120s
+          start_port_forward
           curl -fsS -D "$RUNNER_TEMP/suffix-first.headers" -o "$RUNNER_TEMP/suffix.png" http://127.0.0.1:18080/sample.png/_resize/77x77
           grep -qi '^X-Cache-Status: MISS' "$RUNNER_TEMP/suffix-first.headers"
           curl -fsS -D "$RUNNER_TEMP/suffix-second.headers" -o "$RUNNER_TEMP/suffix-again.png" http://127.0.0.1:18080/sample.png/_resize/77x77
@@ -106,13 +112,15 @@ jobs:
             --set origin.host=origin \
             --set replicaCount=2 \
             --wait --timeout=180s
-          kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=120s
+          kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=180s
+          start_port_forward
           test "$(kubectl get deployment resizer-nginx-image-resizer -o jsonpath='{.spec.replicas}')" = "2"
           curl -fsS http://127.0.0.1:18080/healthz >/dev/null
 
           # Prove the previous Helm revision can be restored after an upgrade.
           helm rollback resizer 1 --wait --timeout=180s
-          kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=120s
+          kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=180s
+          start_port_forward
           test "$(kubectl get deployment resizer-nginx-image-resizer -o jsonpath='{.spec.replicas}')" = "1"
           curl -fsS http://127.0.0.1:18080/healthz >/dev/null
           curl -fsS -o /dev/null http://127.0.0.1:18080/77x77/sample.png
