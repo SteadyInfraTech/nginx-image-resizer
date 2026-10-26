@@ -1,0 +1,15 @@
+name: Resource-limited resize smoke
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  resource-limited-resize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo 'resource smoke scaffold'
