@@ -32,7 +32,8 @@ jobs:
           mkdir -p "$RUNNER_TEMP/chart"
           helm lint charts/nginx-image-resizer
           helm package charts/nginx-image-resizer --destination "$RUNNER_TEMP/chart"
-          chart_archive="$RUNNER_TEMP/chart/nginx-image-resizer-$(python3 -c 'import yaml; print(yaml.safe_load(open("charts/nginx-image-resizer/Chart.yaml"))["version"])').tgz"
+          chart_version="$(sed -n 's/^version: *//p' charts/nginx-image-resizer/Chart.yaml | tr -d '"')"
+          chart_archive="$RUNNER_TEMP/chart/nginx-image-resizer-$chart_version.tgz"
           test -s "$chart_archive"
           helm show chart "$chart_archive"
           helm template resizer "$chart_archive" --set origin.host=origin --set image.tag=ci > "$RUNNER_TEMP/packaged-render.yaml"
