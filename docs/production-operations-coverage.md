@@ -11,7 +11,7 @@ This matrix distinguishes automated checks from deployment-specific validation. 
 | Invalid dimensions, traversal, missing object, corrupt/non-image payload, oversized encoded source | `tests/test_integration.py` | `CI` | Covers request and origin payload failure paths. |
 | Origin HTTP 503 and stale response after expiry | `tests/test_integration.py` and `.github/workflows/cache-expiry-refresh.yml` | `CI`, Cache expiry/refresh | Stale fallback is tested with a short TTL override; default TTL is ten minutes. |
 | Origin read timeout and service recovery | `tests/test_integration.py` | `CI` | Bounded timeout plus a subsequent successful request; not a sustained-outage test. |
-| Origin connection refused / unreachable origin recovery | No dedicated deterministic test yet | Not covered | Add an automated test before treating this failure mode as covered. |
+| Origin connection failure / unreachable origin recovery | `.github/workflows/origin-connection-recovery.yml` | Origin outage recovery | A stopped origin must produce HTTP 502 or 504 on a cold key, then the same key must recover as a valid image with a cache MISS. Docker endpoint cleanup can cause either 502 or 504; `tests/test_integration.py` separately asserts 504 for the read-timeout case. |
 | Corrupt cache entry recovery | Cache corruption recovery test | Cache corruption recovery | Verifies that a bad cached object can be recovered instead of served as a valid image. |
 | Cache filesystem exhaustion (ENOSPC) | Cache storage failure test | Cache storage failure | Verifies requests continue to succeed when cache writes fail; does not establish latency under pressure. |
 | Concurrent requests, stampede, overload rejection | Integration suite and benchmark generator | CI, Load stress | Correctness/status checks and archived measurements; no machine-independent latency gate. |
@@ -21,8 +21,8 @@ This matrix distinguishes automated checks from deployment-specific validation. 
 | Helm lint/render, install, resize/cache, URI-style change, replica scale-up, pod deletion/replacement, rollback | Helm/kind smoke | Helm Kubernetes smoke | Verifies Service requests while one replica is deleted, then waits for replacement and rolls back. |
 | Packaged chart install/upgrade | Packaged chart smoke | Helm packaged chart smoke | Exercises the packaged artifact path, not every external release-registry or cluster combination. |
 | Image/chart appVersion agreement and published image smoke | Release validator and published-image workflow | CI, Publish image, Published image smoke | Checks version metadata and smoke-tests the published image path. |
-| Cache locality across replicas | No dedicated assertion for replica-specific cache contents yet | Partial only | Multiple replicas are exercised, but cache isolation/locality is not explicitly asserted. |
-| ConfigMap change triggers a rollout | Chart has a config checksum annotation; no explicit rollout assertion yet | Partial only | Template design supports it; behavior should be asserted in kind CI. |
+| Cache locality across replicas | Helm/kind smoke contacts each pod directly | Helm Kubernetes smoke | A unique URL must be a MISS then HIT on each of two pods, showing each pod owns an independent cache. This does not assert a particular cache hit ratio through the load-balanced Service. |
+| ConfigMap change triggers a rollout | Helm/kind smoke compares the pod-template config checksum before and after a URI-style ConfigMap change, then waits for rollout | Helm Kubernetes smoke | Confirms a changed rendered NGINX config changes the pod template and completes a rollout. |
 
 ## Deployment-specific validation
 
@@ -33,14 +33,11 @@ This matrix distinguishes automated checks from deployment-specific validation. 
 | TLS certificate renewal and load-balancer integration | Renewal depends on the external certificate manager and deployment topology. | Validate renewal/reload and end-to-end health through the actual load balancer. |
 | Production-scale throughput, latency and cache working-set behavior | Shared CI runners cannot provide stable performance baselines. | Run repeatable benchmarks on a recorded host, with resource limits and a representative request mix. |
 | Network policy and origin/transformer isolation | Chart smoke tests do not prove the surrounding cluster's policies. | Confirm the origin is private, only the intended Service is exposed, and NetworkPolicy/firewall rules match the deployment. |
-| Kubernetes readiness/liveness failure behavior and rolling upgrade when no endpoints are ready | Current kind workflow verifies probes are rendered, pod replacement with a surviving replica, upgrade and rollback; it does not inject probe failures or deliberately remove all ready endpoints during rollout. | Add deterministic kind tests for failed probes and no-ready-endpoint upgrade behavior before relying on those scenarios. |
+| Kubernetes readiness/liveness failure behavior and rolling upgrade when no endpoints are ready | Current kind workflow verifies probe configuration is rendered, successful pod replacement with a surviving replica, config-triggered rollout, upgrade and rollback; it does not deliberately inject probe failures or remove all ready endpoints during rollout. | Exercise failed readiness/liveness and a no-ready-endpoint rollout in a controlled cluster before relying on those scenarios. |
 
 ## Follow-up priorities
 
-1. Add deterministic CI coverage for origin connection refusal and recovery.
-2. Assert that a ConfigMap change causes a new ReplicaSet/rollout.
-3. Exercise readiness/liveness failure and rolling upgrade with no ready endpoints in kind.
-4. Add a replica-locality assertion or keep locality as an explicitly documented operational property.
-5. Revisit resource-limit/OOM automation only when the test harness can make the outcome deterministic; keep performance thresholds measurement-based.
+1. Exercise readiness/liveness failure and rolling upgrade with no ready endpoints in kind.
+2. Revisit resource-limit/OOM automation only when the test harness can make the outcome deterministic; keep performance thresholds measurement-based.
 
 Update this matrix whenever a test or workflow changes. Keep README statements aligned with the actual checks and retain deployment-specific caveats for conditions CI cannot realistically reproduce.

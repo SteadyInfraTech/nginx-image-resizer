@@ -116,7 +116,7 @@ NGINX image filter --> private validator :8082 --> fixed image origin :8081
 
 ## Kubernetes + Helm
 
-A minimal Helm chart is available in charts/nginx-image-resizer. It deploys the same NGINX image with a chart-rendered trusted-origin configuration, bounded per-pod cache/temp volumes, non-root/read-only runtime settings, health probes, and a ClusterIP Service. The origin must resolve from the pod before NGINX starts. See [the chart README](charts/nginx-image-resizer/README.md) for installation, resource sizing, cache locality, and image-tag guidance. The chart is tested with Helm lint/render, assertions for hardened runtime settings and health probes, a kind install, resize/cache smoke tests, pod replacement while serving requests, scaling, upgrade, and rollback.
+A minimal Helm chart is available in charts/nginx-image-resizer. It deploys the same NGINX image with a chart-rendered trusted-origin configuration, bounded per-pod cache/temp volumes, non-root/read-only runtime settings, health probes, and a ClusterIP Service. The origin must resolve from the pod before NGINX starts. See [the chart README](charts/nginx-image-resizer/README.md) for installation, resource sizing, cache locality, and image-tag guidance. The chart is tested with Helm lint/render, assertions for hardened runtime settings and health probes, a kind install, resize/cache smoke tests, config-change-triggered rollout, per-replica cache locality, pod replacement while serving requests, scaling, upgrade, and rollback.
 
 ## Optional validated-origin mode
 
@@ -141,7 +141,7 @@ The integration suite checks resize dimensions and aspect ratio, cache MISS then
 - Arbitrary sizes can fragment the cache; dimension bounds reduce but do not eliminate this.
 - Updating an original at the same path does not automatically invalidate cached variants. Use a versioned URL/query or wait for expiry; there is no purge API.
 - CI uses a one-second TTL override for stale-on-503 testing; the default image retains a ten-minute TTL. Origin read-timeout and recovery behavior are exercised in CI, but a sustained outage and connection-refused recovery still need explicit coverage. High-load behavior under production CPU/memory limits, TLS renewal, and load-balancer integration remain deployment-specific.
-- The cache is local to each instance; replicas do not share cache contents automatically.
+- The cache is local to each instance; replicas do not share cache contents automatically. The kind smoke test checks that a unique URL is a MISS then HIT on each of two individual pods, rather than assuming a request through the Service reaches a particular replica.
 - This is not a full image CDN or media platform. Advanced codecs, cropping, focal points, authorization, purge APIs, and global delivery are out of scope.
 
 ## See also
