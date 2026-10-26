@@ -6,7 +6,7 @@ On-demand image resizing with NGINX, using a simple URL format:
 /77x77/path/to/image.png
 ```
 
-NGINX fetches an original image from a fixed, trusted upstream, resizes it, and caches the transformed response. The default request path is one NGINX process; an optional validated-origin mode is available for deployments that need a pre-decode dimension gate. URI style is configurable at image build time for Compose deployments (`NGINX_URI_STYLE=prefix|suffix`, default `prefix`) and at Helm install time (`--set uriStyle=prefix|suffix`). The prefix form is `/77x77/path/to/image.png`; the suffix form is `/path/to/image.png/_resize/77x77`. The selected form is the only accepted public route for that deployment. The default setup is designed to run behind a load balancer or reverse proxy that handles public HTTPS.
+NGINX fetches an original image from a fixed, trusted upstream, resizes it, and caches the transformed response. The default request path is one NGINX process; an optional validated-origin mode is available for deployments that need a pre-decode dimension gate. URI style is configurable at Compose runtime (`NGINX_URI_STYLE=prefix|suffix`, default `prefix`) and at Helm install time (`--set uriStyle=prefix|suffix`). The prefix form is `/77x77/path/to/image.png`; the suffix form is `/path/to/image.png/_resize/77x77`. The selected form is the only accepted public route for that deployment. The default setup is designed to run behind a load balancer or reverse proxy that handles public HTTPS.
 
 > **Status:** Reference implementation. CI covers the HTTP request path and cache behavior; deployment-specific performance and security validation are still required.
 
@@ -44,6 +44,8 @@ These are defense-in-depth defaults, not a substitute for host-level resource li
 Terminate TLS at the load balancer or reverse proxy and forward HTTP traffic to the container on port `8080`. Publish this port only to a trusted network. The origin and loopback-only transformer should not be exposed publicly.
 
 The demo's host port can be changed with `NGINX_HOST_PORT`. For example, set it to `9080` and use `http://localhost:9080/77x77/sample.png`. This changes only the host-side mapping; the container still listens on `8080`.
+
+To use the suffix URI form with Compose, run `NGINX_URI_STYLE=suffix docker compose up --build`; request `/sample.png/_resize/77x77`. The default prefix form remains `/77x77/sample.png`. Changing this setting selects the route shape at container startup; rebuilds are not required for URI-style changes.
 
 ### Direct HTTPS
 
