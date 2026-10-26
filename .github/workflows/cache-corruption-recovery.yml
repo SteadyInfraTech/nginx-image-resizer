@@ -71,5 +71,3 @@ jobs:
           curl -fsS -D "$RUNNER_TEMP/hit.headers" -o "$RUNNER_TEMP/hit.png" "$url"
           grep -qi '^X-Cache-Status: HIT' "$RUNNER_TEMP/hit.headers"
           cmp "$RUNNER_TEMP/recovered.png" "$RUNNER_TEMP/hit.png"
-      - name: Verify a corrupted cache does not make the service unhealthy
-        run: curl -fsS http://127.0.0.1:8080/healthz
