@@ -131,7 +131,7 @@ This mode adds a private Python service that reads bounded origin responses and 
 
 ## CI coverage
 
-The integration suite checks resize dimensions and aspect ratio, cache MISS then HIT, cache bypass without storage, versioned cache keys, invalid dimensions, path traversal attempts, missing origin objects, upstream 503 preservation, corrupt and non-image payloads, oversized originals, concurrent same-key and distinct transformations, overload rejection when concurrent image requests exceed the configured cap, and stale-cache fallback when the origin returns 503 after expiry. CI also exercises direct-TLS resizing and cache behavior under the hardened container runtime flags.
+The integration suite checks resize dimensions and aspect ratio, cache MISS then HIT, cache bypass without storage, versioned cache keys, invalid dimensions, path traversal attempts, missing origin objects, upstream 503 preservation, corrupt and non-image payloads, oversized originals, concurrent same-key and distinct transformations, overload rejection when concurrent image requests exceed the configured cap, and stale-cache fallback when the origin returns 503 after expiry. CI also exercises direct-TLS resizing and cache behavior under the hardened container runtime flags, plus recovery after a cached file is deliberately corrupted on disk.
 
 ## Limitations
 
@@ -185,7 +185,7 @@ docker stats --no-stream
 docker compose down
 ```
 
-The Load Stress workflow runs 500 requests per mode on pull requests and 1,000 on scheduled/manual runs, at concurrency 12 (below the default 16-request cap), and archives the JSON reports. The Cache Storage Failure workflow fills a deliberately tiny writable cache filesystem and verifies that origin responses still succeed when cache writes fail with ENOSPC. It checks status/cache correctness, not a machine-independent latency target. Repeat at several concurrency levels (for example 1, 4, 8, 16, 32) and record the container memory/CPU from `docker stats`. Use a representative source image and realistic request mix. Do not infer a safe production concurrency limit from a single run or from CI timing; choose limits from sustained measurements and an explicit latency/error budget. The benchmark exits non-zero if requests fail or return a non-2xx status.
+The Load Stress workflow runs 500 requests per mode on pull requests and 1,000 on scheduled/manual runs, at concurrency 12 (below the default 16-request cap), and archives the JSON reports. The Cache Storage Failure workflow fills a deliberately tiny writable cache filesystem and verifies that origin responses still succeed when cache writes fail with ENOSPC. The Cache Corruption Recovery workflow warms a cache entry, corrupts its on-disk file, and verifies NGINX can fetch and cache a valid response again. These checks cover cache failure recovery, not a machine-independent latency target. Repeat at several concurrency levels (for example 1, 4, 8, 16, 32) and record the container memory/CPU from `docker stats`. Use a representative source image and realistic request mix. Do not infer a safe production concurrency limit from a single run or from CI timing; choose limits from sustained measurements and an explicit latency/error budget. The benchmark exits non-zero if requests fail or return a non-2xx status.
 
 ## Development
 
