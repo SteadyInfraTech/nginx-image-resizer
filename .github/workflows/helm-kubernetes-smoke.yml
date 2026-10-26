@@ -219,14 +219,7 @@ jobs:
           kubectl exec deployment/origin -- python -c "import struct; from urllib.request import urlopen; data=urlopen('http://resizer-nginx-image-resizer:8080/77x77/sample.png?failed-upgrade-preserves-capacity=1', timeout=10).read(); assert data[:8] == bytes.fromhex('89504e470d0a1a0a'), 'response is not PNG'; width,height=struct.unpack('>II', data[16:24]); assert (width,height)==(77,57), f'unexpected dimensions: {width}x{height}'"
           echo "Failed rolling-upgrade revision did not remove ready Service capacity; image request still succeeded."
           # Reconcile the failed manual image change back to the chart's known-good image.
-          helm upgrade resizer charts/nginx-image-resizer \\
-            --set image.repository=steady-image-resizer \\
-            --set image.tag=ci \\
-            --set image.pullPolicy=IfNotPresent \\
-            --set origin.host=origin \\
-            --set uriStyle=prefix \\
-            --set replicaCount=2 \\
-            --wait --timeout=180s
+          helm upgrade resizer charts/nginx-image-resizer --set image.repository=steady-image-resizer --set image.tag=ci --set image.pullPolicy=IfNotPresent --set origin.host=origin --set uriStyle=prefix --set replicaCount=2 --wait --timeout=180s
           kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=180s
           test "$(kubectl get deployment resizer-nginx-image-resizer -o jsonpath='{.status.readyReplicas}')" = "2"
           echo "Rolling-upgrade recovery passed: restored healthy revision with two ready replicas."
