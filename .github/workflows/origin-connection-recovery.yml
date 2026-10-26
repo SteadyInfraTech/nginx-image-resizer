@@ -53,7 +53,9 @@ jobs:
       - name: Verify upstream connection failure on a cold cache key
         run: |
           set -eu
-          docker compose stop origin
+          # Stop immediately: graceful `stop` waits for the container's shutdown timeout,
+          # so NGINX may hit its connect timeout and return 504 instead of connection-refused 502.
+          docker compose kill origin
           # A unique key ensures this request cannot succeed from a prior cache entry.
           status="$(curl --max-time 20 -sS -o "$RUNNER_TEMP/origin-down.body" -w '%{http_code}' 'http://127.0.0.1:8080/77x77/sample.png?origin-recovery=down')"
           echo "Cold-cache request while origin is stopped returned HTTP $status"
