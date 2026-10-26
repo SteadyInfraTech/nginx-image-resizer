@@ -1,0 +1,87 @@
+name: Graceful shutdown
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  graceful-shutdown:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Build application and test-origin images
+        run: |
+          docker build -t steady-image-resizer:shutdown .
+          docker build -f demo/Dockerfile -t steady-image-resizer-demo-origin:shutdown .
+      - name: Verify graceful shutdown completes an in-flight request
+        shell: bash
+        run: |
+          set -euo pipefail
+          network=graceful-shutdown-net
+          docker network create "$network"
+          cleanup() {
+            docker logs resizer-shutdown 2>/dev/null || true
+            docker logs origin-shutdown 2>/dev/null || true
+            docker rm -f resizer-shutdown origin-shutdown >/dev/null 2>&1 || true
+            docker network rm "$network" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          docker run -d --name origin-shutdown --network "$network" --network-alias origin steady-image-resizer-demo-origin:shutdown
+          origin_ready=0
+          for attempt in $(seq 1 30); do
+            if docker exec origin-shutdown python -c 'from urllib.request import urlopen; r=urlopen("http://127.0.0.1:8081/sample.png", timeout=1); assert r.status == 200; r.read(8)' >/dev/null 2>&1; then origin_ready=1; break; fi
+            sleep 1
+          done
+          test "$origin_ready" = "1"
+
+          docker run -d --name resizer-shutdown --network "$network" -p 18080:8080 \
+            --read-only --cap-drop ALL --cap-add CHOWN --cap-add SETUID --cap-add SETGID \
+            --security-opt no-new-privileges:true \
+            --tmpfs /run/nginx:rw,noexec,nosuid,size=1m,mode=0755 \
+            --tmpfs /var/lib/nginx/tmp:rw,noexec,nosuid,size=16m,mode=1777 \
+            --tmpfs /var/cache/nginx:rw,noexec,nosuid,size=96m,mode=1777 \
+            --tmpfs /tmp:rw,noexec,nosuid,size=16m,mode=1777 \
+            steady-image-resizer:shutdown
+          ready=0
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:18080/healthz >/dev/null; then ready=1; break; fi
+            sleep 1
+          done
+          test "$ready" = "1"
+
+          stop_signal="$(docker inspect --format '{{.Config.StopSignal}}' resizer-shutdown)"
+          test "$stop_signal" = "SIGQUIT"
+
+          curl -fsS --max-time 9 -D "$RUNNER_TEMP/inflight.headers" \
+            -o "$RUNNER_TEMP/inflight.png" -w '%{http_code}' \
+            'http://127.0.0.1:18080/77x77/slow-shutdown.png?bypass_cache=1' > "$RUNNER_TEMP/inflight.status" &
+          request_pid=$!
+
+          in_flight=0
+          for attempt in $(seq 1 30); do
+            if docker logs origin-shutdown 2>&1 | grep -q 'slow shutdown request started'; then in_flight=1; break; fi
+            sleep 0.1
+          done
+          test "$in_flight" = "1"
+
+          # Docker's image stop signal must be graceful and allow the active request to finish.
+          docker stop --time 10 resizer-shutdown >/dev/null
+          wait "$request_pid"
+          test "$(cat "$RUNNER_TEMP/inflight.status")" = "200"
+          grep -qi '^X-Cache-Status: BYPASS' "$RUNNER_TEMP/inflight.headers"
+          python3 - "$RUNNER_TEMP/inflight.png" <<'PY'
+          import struct, sys
+          data = open(sys.argv[1], "rb").read()
+          assert data[:8] == bytes.fromhex("89504e470d0a1a0a"), "response is not PNG"
+          width, height = struct.unpack(">II", data[16:24])
+          assert (width, height) == (77, 57), f"unexpected dimensions: {width}x{height}"
+          print(f"graceful shutdown passed: in-flight resize completed ({width}x{height})")
+          PY
