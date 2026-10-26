@@ -188,16 +188,18 @@ jobs:
           kubectl scale deployment/resizer-nginx-image-resizer --replicas=2
           kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=180s
           test "$(kubectl get deployment resizer-nginx-image-resizer -o jsonpath='{.status.readyReplicas}')" = "2"
-          start_port_forward
-          curl -fsS -o "$RUNNER_TEMP/recovered-after-zero-endpoints.png" http://127.0.0.1:18080/77x77/sample.png
-          python3 - "$RUNNER_TEMP/recovered-after-zero-endpoints.png" <<'PY'
-          import struct, sys
-          data = open(sys.argv[1], "rb").read()
-          assert data[:8] == bytes.fromhex("89504e470d0a1a0a"), "response is not PNG"
-          width, height = struct.unpack(">II", data[16:24])
-          assert (width, height) == (77, 57), f"unexpected dimensions: {width}x{height}"
-          print("service recovered after zero-endpoint interval")
-          PY
+          # Assert EndpointSlice/Service discovery is populated and exercise the
+          # actual in-cluster Service DNS path, not kubectl port-forward (which
+          # selects a pod and can bypass the Service data path).
+          endpoint_ips=""
+          for attempt in $(seq 1 30); do
+            endpoint_ips="$(kubectl get endpoints resizer-nginx-image-resizer -o jsonpath='{.subsets[*].addresses[*].ip}')"
+            if [ -n "$endpoint_ips" ]; then break; fi
+            sleep 1
+          done
+          test -n "$endpoint_ips"
+          kubectl exec deployment/origin -- python -c "import struct; from urllib.request import urlopen; data=urlopen('http://resizer-nginx-image-resizer:8080/77x77/sample.png?zero-endpoint-recovery=1', timeout=10).read(); assert data[:8] == bytes.fromhex('89504e470d0a1a0a'), 'response is not PNG'; width,height=struct.unpack('>II', data[16:24]); assert (width,height)==(77,57), f'unexpected dimensions: {width}x{height}'"
+          echo "Service routing recovered after zero-endpoint interval"
 
           # Prove the previous Helm revision can be restored after an upgrade.
           helm rollback resizer 1 --wait --timeout=180s
