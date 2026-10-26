@@ -38,6 +38,10 @@ jobs:
           helm show chart "$chart_archive"
           helm template resizer "$chart_archive" --set origin.host=origin --set image.tag=ci > "$RUNNER_TEMP/packaged-render.yaml"
           grep -q 'image_filter resize' "$RUNNER_TEMP/packaged-render.yaml"
+          grep -q 'error_page 502 = @origin_bad_gateway;' "$RUNNER_TEMP/packaged-render.yaml"
+          grep -q 'error_page 504 = @origin_gateway_timeout;' "$RUNNER_TEMP/packaged-render.yaml"
+          grep -q 'location @origin_bad_gateway { return 502; }' "$RUNNER_TEMP/packaged-render.yaml"
+          grep -q 'location @origin_gateway_timeout { return 504; }' "$RUNNER_TEMP/packaged-render.yaml"
       - name: Create kind cluster
         uses: helm/kind-action@v1.12.0
         with:
