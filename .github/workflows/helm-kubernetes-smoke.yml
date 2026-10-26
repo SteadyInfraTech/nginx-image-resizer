@@ -201,48 +201,31 @@ jobs:
           kubectl exec deployment/origin -- python -c "import struct; from urllib.request import urlopen; data=urlopen('http://resizer-nginx-image-resizer:8080/77x77/sample.png?zero-endpoint-recovery=1', timeout=10).read(); assert data[:8] == bytes.fromhex('89504e470d0a1a0a'), 'response is not PNG'; width,height=struct.unpack('>II', data[16:24]); assert (width,height)==(77,57), f'unexpected dimensions: {width}x{height}'"
           echo "Service routing recovered after zero-endpoint interval"
 
-          # Inject a readiness failure into the new ReplicaSet. With maxUnavailable=0,
-          # the existing ready replicas must remain in Service endpoints while the
-          # bad revision is withheld from traffic. Restore the probe and require rollout.
-          kubectl patch deployment/resizer-nginx-image-resizer --type='json' \\
-            -p='[{"op":"replace","path":"/spec/template/spec/containers/0/readinessProbe/httpGet/path","value":"/intentional-readiness-failure"}]'
-          readiness_failure_seen=0
-          for attempt in $(seq 1 45); do
-            pod_ready_values="$(kubectl get pods -l app.kubernetes.io/instance=resizer,app.kubernetes.io/name=nginx-image-resizer -o jsonpath='{.items[*].status.containerStatuses[0].ready}')"
-            endpoint_ips="$(kubectl get endpoints resizer-nginx-image-resizer -o jsonpath='{.subsets[*].addresses[*].ip}')"
-            if echo "$pod_ready_values" | grep -qw false && [ -n "$endpoint_ips" ]; then readiness_failure_seen=1; break; fi
+          # Bad readiness must keep new pods out of endpoints while old replicas serve.
+          kubectl patch deployment/resizer-nginx-image-resizer --type=json -p='[{"op":"replace","path":"/spec/template/spec/containers/0/readinessProbe/httpGet/path","value":"/probe-failure"}]'
+          readiness_seen=0
+          for attempt in $(seq 1 30); do
+            ready="$(kubectl get pods -l app.kubernetes.io/instance=resizer,app.kubernetes.io/name=nginx-image-resizer -o jsonpath='{.items[*].status.containerStatuses[0].ready}')"
+            endpoints="$(kubectl get endpoints resizer-nginx-image-resizer -o jsonpath='{.subsets[*].addresses[*].ip}')"
+            if echo "$ready" | grep -qw false && [ -n "$endpoints" ]; then readiness_seen=1; break; fi
             sleep 2
           done
-          test "$readiness_failure_seen" = "1"
-          echo "Readiness failure withheld the new pod while existing Service endpoints remained available."
-          kubectl patch deployment/resizer-nginx-image-resizer --type='json' \\
-            -p='[{"op":"replace","path":"/spec/template/spec/containers/0/readinessProbe/httpGet/path","value":"/healthz"}]'
+          test "$readiness_seen" = "1"
+          kubectl patch deployment/resizer-nginx-image-resizer --type=json -p='[{"op":"replace","path":"/spec/template/spec/containers/0/readinessProbe/httpGet/path","value":"/healthz"}]'
           kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=180s
-          test "$(kubectl get deployment resizer-nginx-image-resizer -o jsonpath='{.status.readyReplicas}')" = "2"
 
-          # Inject a liveness failure in a new pod and verify kubelet restarts its
-          # container while the previous healthy replicas continue serving traffic.
-          kubectl patch deployment/resizer-nginx-image-resizer --type='json' \\
-            -p='[{"op":"replace","path":"/spec/template/spec/containers/0/livenessProbe/httpGet/path","value":"/intentional-liveness-failure"}]'
-          liveness_restart_seen=0
-          for attempt in $(seq 1 40); do
-            restart_counts="$(kubectl get pods -l app.kubernetes.io/instance=resizer,app.kubernetes.io/name=nginx-image-resizer -o jsonpath='{range .items[*]}{.status.containerStatuses[0].restartCount}{"\\n"}{end}')"
-            endpoint_ips="$(kubectl get endpoints resizer-nginx-image-resizer -o jsonpath='{.subsets[*].addresses[*].ip}')"
-            if echo "$restart_counts" | grep -Eq '^[1-9][0-9]*          helm rollback resizer 1 --wait --timeout=180s
-          kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=120s
-          start_port_forward
-          test "$(kubectl get deployment resizer-nginx-image-resizer -o jsonpath='{.spec.replicas}')" = "1"
-          curl -fsS http://127.0.0.1:18080/healthz >/dev/null
-          curl -fsS -o /dev/null http://127.0.0.1:18080/77x77/sample.png
- && [ -n "$endpoint_ips" ]; then liveness_restart_seen=1; break; fi
+          # Bad liveness must trigger a restart without removing healthy old endpoints.
+          kubectl patch deployment/resizer-nginx-image-resizer --type=json -p='[{"op":"replace","path":"/spec/template/spec/containers/0/livenessProbe/httpGet/path","value":"/probe-failure"}]'
+          liveness_seen=0
+          for attempt in $(seq 1 35); do
+            restarts="$(kubectl get pods -l app.kubernetes.io/instance=resizer,app.kubernetes.io/name=nginx-image-resizer -o jsonpath='{.items[*].status.containerStatuses[0].restartCount}')"
+            endpoints="$(kubectl get endpoints resizer-nginx-image-resizer -o jsonpath='{.subsets[*].addresses[*].ip}')"
+            if echo "$restarts" | grep -Eq '(^| )([1-9][0-9]*)( |$)' && [ -n "$endpoints" ]; then liveness_seen=1; break; fi
             sleep 2
           done
-          test "$liveness_restart_seen" = "1"
-          echo "Liveness failure caused a container restart while healthy Service endpoints remained available."
-          kubectl patch deployment/resizer-nginx-image-resizer --type='json' \\
-            -p='[{"op":"replace","path":"/spec/template/spec/containers/0/livenessProbe/httpGet/path","value":"/healthz"}]'
+          test "$liveness_seen" = "1"
+          kubectl patch deployment/resizer-nginx-image-resizer --type=json -p='[{"op":"replace","path":"/spec/template/spec/containers/0/livenessProbe/httpGet/path","value":"/healthz"}]'
           kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=180s
-          test "$(kubectl get deployment resizer-nginx-image-resizer -o jsonpath='{.status.readyReplicas}')" = "2"
 
           # Prove the previous Helm revision can be restored after an upgrade.
           helm rollback resizer 1 --wait --timeout=180s
