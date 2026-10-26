@@ -42,6 +42,8 @@ PNG_DIMENSION_BOMB = (b"\x89PNG\r\n\x1a\n"
                      + png_chunk(b"IEND", b""))
 STALE_SAMPLE_AVAILABLE = True
 STALE_SAMPLE_LOCK = threading.Lock()
+MUTABLE_SAMPLE_VERSION = 1
+MUTABLE_SAMPLE_LOCK = threading.Lock()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -117,6 +119,15 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+        elif parsed.path == "/mutable-sample.png":
+            with MUTABLE_SAMPLE_LOCK:
+                version = MUTABLE_SAMPLE_VERSION
+            body = PNG if version == 1 else PNG_VERSION_2
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
         elif parsed.path == "/sample.png":
             body = PNG_VERSION_2 if query.get("version") == ["2"] else PNG
             self.send_response(200)
@@ -163,21 +174,28 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(404)
 
     def do_POST(self):
-        global STALE_SAMPLE_AVAILABLE
+        global STALE_SAMPLE_AVAILABLE, MUTABLE_SAMPLE_VERSION
         parsed = urlsplit(self.path)
-        if parsed.path != "/__test__/stale-sample-status":
-            self.send_error(404)
-            return
         try:
-            status = int(self.rfile.read(int(self.headers.get("Content-Length", "0"))).decode("ascii"))
+            value = int(self.rfile.read(int(self.headers.get("Content-Length", "0"))).decode("ascii"))
         except (ValueError, UnicodeDecodeError):
             self.send_error(400)
             return
-        if status not in (200, 503):
-            self.send_error(400)
+        if parsed.path == "/__test__/stale-sample-status":
+            if value not in (200, 503):
+                self.send_error(400)
+                return
+            with STALE_SAMPLE_LOCK:
+                STALE_SAMPLE_AVAILABLE = value == 200
+        elif parsed.path == "/__test__/mutable-sample-version":
+            if value not in (1, 2):
+                self.send_error(400)
+                return
+            with MUTABLE_SAMPLE_LOCK:
+                MUTABLE_SAMPLE_VERSION = value
+        else:
+            self.send_error(404)
             return
-        with STALE_SAMPLE_LOCK:
-            STALE_SAMPLE_AVAILABLE = status == 200
         self.send_response(204)
         self.end_headers()
 

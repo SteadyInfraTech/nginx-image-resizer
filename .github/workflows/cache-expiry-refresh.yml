@@ -1,0 +1,66 @@
+name: Cache expiry and refresh
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cache-expiry-refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      NGINX_CACHE_VALIDITY: 1s
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Start stack with short cache TTL
+        run: docker compose up --build -d nginx origin
+      - name: Verify fresh, cached, expired, and refreshed responses
+        shell: bash
+        run: |
+          set -euo pipefail
+          cleanup() {
+            docker compose logs --no-color nginx origin || true
+            docker compose down --volumes --remove-orphans
+          }
+          trap cleanup EXIT
+
+          base=http://127.0.0.1:8080
+          url="$base/77x77/mutable-sample.png"
+          origin_ready=0
+          for attempt in $(seq 1 30); do
+            if docker compose exec -T origin python -c 'from urllib.request import urlopen; r=urlopen("http://127.0.0.1:8081/sample.png", timeout=1); assert r.status == 200; r.read(8)' >/dev/null 2>&1; then origin_ready=1; break; fi
+            sleep 1
+          done
+          test "$origin_ready" = "1"
+
+          ready=0
+          for attempt in $(seq 1 30); do
+            if curl -fsS "$base/healthz" >/dev/null; then ready=1; break; fi
+            sleep 1
+          done
+          test "$ready" = "1"
+
+          curl -fsS -D "$RUNNER_TEMP/initial.headers" -o "$RUNNER_TEMP/initial.png" "$url"
+          grep -qi '^X-Cache-Status: MISS' "$RUNNER_TEMP/initial.headers"
+          curl -fsS -D "$RUNNER_TEMP/hit.headers" -o "$RUNNER_TEMP/hit.png" "$url"
+          grep -qi '^X-Cache-Status: HIT' "$RUNNER_TEMP/hit.headers"
+          cmp "$RUNNER_TEMP/initial.png" "$RUNNER_TEMP/hit.png"
+
+          # Change the origin behind the same URL without changing the cache key.
+          docker compose exec -T origin python -c 'from urllib.request import Request,urlopen; req=Request("http://127.0.0.1:8081/__test__/mutable-sample-version", data=b"2", method="POST"); assert urlopen(req, timeout=2).status == 204'
+          sleep 2
+
+          curl -fsS --max-time 10 -D "$RUNNER_TEMP/refreshed.headers" -o "$RUNNER_TEMP/refreshed.png" "$url"
+          grep -Eqi '^X-Cache-Status: (EXPIRED|MISS)' "$RUNNER_TEMP/refreshed.headers"
+          cmp -s "$RUNNER_TEMP/initial.png" "$RUNNER_TEMP/refreshed.png" && { echo "expired cache unexpectedly served the old image" >&2; exit 1; }
+
+          curl -fsS -D "$RUNNER_TEMP/refreshed-hit.headers" -o "$RUNNER_TEMP/refreshed-hit.png" "$url"
+          grep -qi '^X-Cache-Status: HIT' "$RUNNER_TEMP/refreshed-hit.headers"
+          cmp "$RUNNER_TEMP/refreshed.png" "$RUNNER_TEMP/refreshed-hit.png"
+          echo "cache expiry and refresh passed: expired entry refetched new origin content and subsequent request HIT"
