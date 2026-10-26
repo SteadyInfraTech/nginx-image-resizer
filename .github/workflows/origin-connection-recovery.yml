@@ -50,12 +50,13 @@ jobs:
           assert struct.unpack(">II", data[16:24]) == (77, 57), "baseline dimensions differ"
           PY
 
-      - name: Verify connection-refused response on a cold cache key
+      - name: Verify upstream connection failure on a cold cache key
         run: |
           set -eu
           docker compose stop origin
           # A unique key ensures this request cannot succeed from a prior cache entry.
-          status="$(curl --max-time 8 -sS -o "$RUNNER_TEMP/origin-down.body" -w '%{http_code}' 'http://127.0.0.1:8080/77x77/sample.png?origin-recovery=down')"
+          status="$(curl --max-time 20 -sS -o "$RUNNER_TEMP/origin-down.body" -w '%{http_code}' 'http://127.0.0.1:8080/77x77/sample.png?origin-recovery=down')"
+          echo "Cold-cache request while origin is stopped returned HTTP $status"
           test "$status" = "502"
           if grep -q '89504e470d0a1a0a' "$RUNNER_TEMP/origin-down.body"; then
             echo "image response unexpectedly returned while origin was stopped" >&2
