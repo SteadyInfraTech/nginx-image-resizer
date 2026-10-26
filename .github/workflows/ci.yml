@@ -39,8 +39,9 @@ jobs:
         uses: actions/checkout@v4
       - name: Verify invalid URI style is rejected at build time
         run: |
-          if docker build --build-arg NGINX_URI_STYLE=invalid -t image-resizer-invalid-uri-style .; then
-            echo "invalid URI style unexpectedly built successfully" >&2
+          docker build -t image-resizer-uri-style-test .
+          if docker run --rm -e NGINX_URI_STYLE=invalid image-resizer-uri-style-test; then
+            echo "invalid URI style unexpectedly started successfully" >&2
             exit 1
           fi
       - name: Build and run suffix-style integration tests
