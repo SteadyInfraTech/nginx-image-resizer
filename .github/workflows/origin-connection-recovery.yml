@@ -20,6 +20,17 @@ jobs:
       - name: Build and start NGINX with the test origin
         run: |
           docker compose up --build -d origin nginx
+          # NGINX healthz does not prove the upstream origin is accepting requests.
+          # Wait for the origin fixture itself before testing the baseline image fetch.
+          origin_ready=0
+          for attempt in $(seq 1 30); do
+            if docker compose exec -T origin python -c 'from urllib.request import urlopen; r=urlopen("http://127.0.0.1:8081/sample.png", timeout=1); assert r.status == 200; r.read(8)' >/dev/null 2>&1; then
+              origin_ready=1
+              break
+            fi
+            sleep 1
+          done
+          test "$origin_ready" = "1"
           ready=0
           for attempt in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:8080/healthz >/dev/null; then
