@@ -20,8 +20,15 @@ jobs:
         run: |
           docker compose config --quiet
           docker compose -f docker-compose.yml -f docker-compose.validated.yml config --quiet
-      - name: Check benchmark script syntax
-        run: python3 -m py_compile tools/benchmark.py
+      - name: Validate Helm chart release metadata
+        run: |
+          python3 tools/validate_chart_release.py
+          if python3 tools/validate_chart_release.py --expected-app-version 9.9.9; then
+            echo "mismatched appVersion unexpectedly passed validation" >&2
+            exit 1
+          fi
+      - name: Check benchmark and release validator syntax
+        run: python3 -m py_compile tools/benchmark.py tools/validate_chart_release.py
       - name: Build and run integration tests
         run: docker compose up --build --abort-on-container-exit --exit-code-from tests
       - name: Show logs on failure
