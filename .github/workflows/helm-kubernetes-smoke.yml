@@ -64,7 +64,7 @@ jobs:
           set -eu
           port_forward_pid=""
           start_port_forward() {
-            if [ -n "$port_forward_pid" ]; then kill "$port_forward_pid" 2>/dev/null || true; fi
+            if [ -n "$port_forward_pid" ]; then kill "$port_forward_pid" 2>/dev/null || true; wait "$port_forward_pid" 2>/dev/null || true; fi
             kubectl port-forward service/resizer-nginx-image-resizer 18080:8080 > "$RUNNER_TEMP/port-forward.log" 2>&1 &
             port_forward_pid=$!
             ready=0
