@@ -50,11 +50,11 @@ jobs:
           kubectl create deployment origin --image=steady-image-resizer-demo-origin:ci
           kubectl expose deployment origin --port=8081 --target-port=8081
           kubectl rollout status deployment/origin --timeout=120s
-          helm upgrade --install resizer charts/nginx-image-resizer \\
-            --set image.repository=steady-image-resizer \\
-            --set image.tag=ci \\
-            --set image.pullPolicy=IfNotPresent \\
-            --set origin.host=origin \\
+          helm upgrade --install resizer charts/nginx-image-resizer \
+            --set image.repository=steady-image-resizer \
+            --set image.tag=ci \
+            --set image.pullPolicy=IfNotPresent \
+            --set origin.host=origin \
             --set replicaCount=1
           kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=120s
       - name: Diagnose Kubernetes startup failures
@@ -96,13 +96,13 @@ jobs:
           assert (width, height) == (77, 57), f"unexpected dimensions: {width}x{height}"
           print(f"kind smoke passed: {width}x{height}, cache miss/hit verified")
           PY
-          helm upgrade resizer charts/nginx-image-resizer \\
-            --set image.repository=steady-image-resizer \\
-            --set image.tag=ci \\
-            --set image.pullPolicy=IfNotPresent \\
-            --set origin.host=origin \\
-            --set uriStyle=suffix \\
-            --set replicaCount=1 \\
+          helm upgrade resizer charts/nginx-image-resizer \
+            --set image.repository=steady-image-resizer \
+            --set image.tag=ci \
+            --set image.pullPolicy=IfNotPresent \
+            --set origin.host=origin \
+            --set uriStyle=suffix \
+            --set replicaCount=1 \
             --wait --timeout=180s
           kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=120s
           start_port_forward
@@ -111,12 +111,12 @@ jobs:
           curl -fsS -D "$RUNNER_TEMP/suffix-second.headers" -o "$RUNNER_TEMP/suffix-again.png" http://127.0.0.1:18080/sample.png/_resize/77x77
           grep -qi '^X-Cache-Status: HIT' "$RUNNER_TEMP/suffix-second.headers"
           cmp "$RUNNER_TEMP/suffix.png" "$RUNNER_TEMP/suffix-again.png"
-          helm upgrade resizer charts/nginx-image-resizer \\
-            --set image.repository=steady-image-resizer \\
-            --set image.tag=ci \\
-            --set image.pullPolicy=IfNotPresent \\
-            --set origin.host=origin \\
-            --set replicaCount=2 \\
+          helm upgrade resizer charts/nginx-image-resizer \
+            --set image.repository=steady-image-resizer \
+            --set image.tag=ci \
+            --set image.pullPolicy=IfNotPresent \
+            --set origin.host=origin \
+            --set replicaCount=2 \
             --wait --timeout=180s
           kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=180s
           start_port_forward
