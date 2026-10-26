@@ -31,6 +31,7 @@ jobs:
           grep -q 'image_filter resize' "$RUNNER_TEMP/rendered.yaml"
           helm template resizer charts/nginx-image-resizer --set origin.host=origin --set image.tag=ci --set uriStyle=suffix > "$RUNNER_TEMP/rendered-suffix.yaml"
           grep -q '/_resize/' "$RUNNER_TEMP/rendered-suffix.yaml"
+          if helm template resizer charts/nginx-image-resizer --set uriStyle=invalid > /dev/null 2>&1; then echo "invalid uriStyle unexpectedly passed schema validation" >&2; exit 1; fi
           if grep -q '^ *location ~ \^/(?<edge_width>.*edge_image_path' "$RUNNER_TEMP/rendered-suffix.yaml"; then echo "prefix route unexpectedly rendered for suffix style" >&2; exit 1; fi
       - name: Build and load application and test-origin images
         run: |
