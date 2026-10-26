@@ -27,7 +27,7 @@ jobs:
           import json, sys
           service = json.load(open(sys.argv[1]))["services"]["nginx"]
           for key in ("mem_limit", "memswap_limit"):
-              assert service.get(key) in (128 * 1024 * 1024, "128m", "128M"), (key, service.get(key))
+              assert service.get(key) in (128 * 1024 * 1024, str(128 * 1024 * 1024), "128m", "128M"), (key, service.get(key))
           assert service.get("cpus") in (0.5, "0.5"), service.get("cpus")
           print("Compose renders 128 MiB memory/swap and 0.5 CPU limits")
           PY
