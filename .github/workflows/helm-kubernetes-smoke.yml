@@ -201,6 +201,36 @@ jobs:
           kubectl exec deployment/origin -- python -c "import struct; from urllib.request import urlopen; data=urlopen('http://resizer-nginx-image-resizer:8080/77x77/sample.png?zero-endpoint-recovery=1', timeout=10).read(); assert data[:8] == bytes.fromhex('89504e470d0a1a0a'), 'response is not PNG'; width,height=struct.unpack('>II', data[16:24]); assert (width,height)==(77,57), f'unexpected dimensions: {width}x{height}'"
           echo "Service routing recovered after zero-endpoint interval"
 
+          # Simulate a broken rolling-upgrade revision with an image that cannot be pulled.
+          # The chart's maxUnavailable=0/maxSurge=1 policy must preserve the old ready pods
+          # and Service endpoints until the new revision can become healthy.
+          kubectl set image deployment/resizer-nginx-image-resizer nginx=steady-image-resizer:missing-rolling-upgrade-fixture
+          bad_revision_seen=0
+          for attempt in $(seq 1 30); do
+            bad_pods="$(kubectl get pods -l app.kubernetes.io/instance=resizer,app.kubernetes.io/name=nginx-image-resizer -o jsonpath='{.items[*].spec.containers[0].image}')"
+            endpoint_ips="$(kubectl get endpoints resizer-nginx-image-resizer -o jsonpath='{.subsets[*].addresses[*].ip}')"
+            if echo "$bad_pods" | grep -q 'missing-rolling-upgrade-fixture' && [ -n "$endpoint_ips" ]; then
+              set -- $endpoint_ips
+              if [ "$#" -ge 2 ]; then bad_revision_seen=1; break; fi
+            fi
+            sleep 2
+          done
+          test "$bad_revision_seen" = "1"
+          kubectl exec deployment/origin -- python -c "import struct; from urllib.request import urlopen; data=urlopen('http://resizer-nginx-image-resizer:8080/77x77/sample.png?failed-upgrade-preserves-capacity=1', timeout=10).read(); assert data[:8] == bytes.fromhex('89504e470d0a1a0a'), 'response is not PNG'; width,height=struct.unpack('>II', data[16:24]); assert (width,height)==(77,57), f'unexpected dimensions: {width}x{height}'"
+          echo "Failed rolling-upgrade revision did not remove ready Service capacity; image request still succeeded."
+          # Reconcile the failed manual image change back to the chart's known-good image.
+          helm upgrade resizer charts/nginx-image-resizer \\
+            --set image.repository=steady-image-resizer \\
+            --set image.tag=ci \\
+            --set image.pullPolicy=IfNotPresent \\
+            --set origin.host=origin \\
+            --set uriStyle=prefix \\
+            --set replicaCount=2 \\
+            --wait --timeout=180s
+          kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=180s
+          test "$(kubectl get deployment resizer-nginx-image-resizer -o jsonpath='{.status.readyReplicas}')" = "2"
+          echo "Rolling-upgrade recovery passed: restored healthy revision with two ready replicas."
+
           # Bad readiness must keep new pods out of endpoints while old replicas serve.
           kubectl patch deployment/resizer-nginx-image-resizer --type=json -p='[{"op":"replace","path":"/spec/template/spec/containers/0/readinessProbe/httpGet/path","value":"/probe-failure"}]'
           readiness_seen=0
