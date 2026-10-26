@@ -16,12 +16,20 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v4
+      - name: Validate Helm chart release metadata
+        run: |
+          python3 tools/validate_chart_release.py
+          python3 tools/validate_chart_release.py --expected-app-version 0.1.0
+          if python3 tools/validate_chart_release.py --expected-app-version 9.9.9; then
+            echo "mismatched appVersion unexpectedly passed validation" >&2
+            exit 1
+          fi
       - name: Validate Compose configurations
         run: |
           docker compose config --quiet
           docker compose -f docker-compose.yml -f docker-compose.validated.yml config --quiet
-      - name: Check benchmark script syntax
-        run: python3 -m py_compile tools/benchmark.py
+      - name: Check benchmark and release validator syntax
+        run: python3 -m py_compile tools/benchmark.py tools/validate_chart_release.py
       - name: Build and run integration tests
         run: docker compose up --build --abort-on-container-exit --exit-code-from tests
       - name: Show logs on failure
@@ -87,8 +95,6 @@ jobs:
             -keyout "$RUNNER_TEMP/image-resizer-tls/tls.key" \
             -out "$RUNNER_TEMP/image-resizer-tls/tls.crt" \
             -subj "/CN=localhost"
-          # The hardened container drops DAC_OVERRIDE; make the ephemeral key
-          # readable by container root through normal ownership, not extra caps.
           sudo chown root:root "$RUNNER_TEMP/image-resizer-tls/tls.key" "$RUNNER_TEMP/image-resizer-tls/tls.crt"
           sudo chmod 600 "$RUNNER_TEMP/image-resizer-tls/tls.key"
           sudo chmod 644 "$RUNNER_TEMP/image-resizer-tls/tls.crt"
@@ -103,43 +109,34 @@ jobs:
             exit 1
           fi
           if docker build --build-arg NGINX_ORIGIN_UPSTREAM="origin:8081; return 200" -t invalid-origin-upstream-test .; then
-            echo "invalid origin upstream build argument was accepted" >&2
+            echo "invalid origin upstream was accepted" >&2
             exit 1
           fi
       - name: Build direct-TLS and demo-origin images
         run: |
           docker build --build-arg NGINX_CONFIG=nginx-direct-tls.conf -t steady-nginx-image-resizer:direct-tls .
-          docker build -f demo/Dockerfile -t steady-image-resizer-demo-origin .
+          docker build -f demo/Dockerfile -t steady-nginx-image-resizer-demo-origin .
       - name: Test direct-TLS routing, resizing, cache, and hardened runtime
         run: |
           set -eu
           network=direct-tls-smoke-net
           docker network create "$network"
-          docker run -d --name direct-tls-origin --network "$network" \
-            --network-alias origin steady-image-resizer-demo-origin
+          docker run -d --name direct-tls-origin --network "$network" --network-alias origin steady-nginx-image-resizer-demo-origin
           origin_ready=0
           for attempt in $(seq 1 20); do
-            if docker exec direct-tls-origin python -c 'from urllib.request import urlopen; r=urlopen("http://127.0.0.1:8081/sample.png", timeout=1); assert r.status == 200 and r.headers.get_content_type() == "image/png"; r.read(8)' ; then
-              origin_ready=1
-              break
-            fi
+            if docker exec direct-tls-origin python -c 'from urllib.request import urlopen; r=urlopen("http://127.0.0.1:8081/sample.png", timeout=1); assert r.status == 200 and r.headers.get_content_type() == "image/png"; r.read(8)' ; then origin_ready=1; break; fi
             sleep 1
           done
           test "$origin_ready" = "1"
-          docker run --rm --network "$network" \
-            -v "$RUNNER_TEMP/image-resizer-tls:/etc/nginx/tls:ro" \
-            steady-nginx-image-resizer:direct-tls nginx -t
+          docker run --rm --network "$network" -v "$RUNNER_TEMP/image-resizer-tls:/etc/nginx/tls:ro" steady-nginx-image-resizer:direct-tls nginx -t
           docker run -d --name direct-tls-smoke --network "$network" \
-            --read-only \
-            --cap-drop ALL --cap-add CHOWN --cap-add SETUID --cap-add SETGID --cap-add NET_BIND_SERVICE \
+            --read-only --cap-drop ALL --cap-add CHOWN --cap-add SETUID --cap-add SETGID --cap-add NET_BIND_SERVICE \
             --security-opt no-new-privileges:true \
             --tmpfs /run/nginx:rw,noexec,nosuid,size=1m,mode=0755 \
             --tmpfs /var/lib/nginx/tmp:rw,noexec,nosuid,size=16m,mode=1777 \
             --tmpfs /var/cache/nginx:rw,noexec,nosuid,size=96m,mode=1777 \
             --tmpfs /tmp:rw,noexec,nosuid,size=16m,mode=1777 \
-            -p 18080:80 -p 18443:443 \
-            -v "$RUNNER_TEMP/image-resizer-tls:/etc/nginx/tls:ro" \
-            steady-nginx-image-resizer:direct-tls
+            -p 18080:80 -p 18443:443 -v "$RUNNER_TEMP/image-resizer-tls:/etc/nginx/tls:ro" steady-nginx-image-resizer:direct-tls
           cleanup() {
             docker logs direct-tls-smoke 2>/dev/null || true
             docker logs direct-tls-origin 2>/dev/null || true
@@ -158,18 +155,14 @@ jobs:
           curl -sS -D "$RUNNER_TEMP/host-redirect-headers.txt" -o /dev/null -H 'Host: attacker.example' http://127.0.0.1:18080/redirect-check
           grep -qi '^Location: https://localhost/redirect-check' "$RUNNER_TEMP/host-redirect-headers.txt"
           test "$(curl -ksS -o /dev/null -w '%{http_code}' https://127.0.0.1:18443/healthz)" = "200"
-          # Keep input validation and traversal defenses covered for the
-          # separate direct-TLS configuration, not only the default HTTP one.
           test "$(curl -ksS -o /dev/null -w '%{http_code}' https://127.0.0.1:18443/0x10/sample.png)" = "400"
           test "$(curl -ksS -o /dev/null -w '%{http_code}' https://127.0.0.1:18443/2049x10/sample.png)" = "400"
           traversal_status="$(curl --path-as-is -ksS -o /dev/null -w '%{http_code}' https://127.0.0.1:18443/77x77/../sample.png)"
           case "$traversal_status" in 400|404) ;; *) echo "unexpected traversal status: $traversal_status" >&2; exit 1 ;; esac
-          curl -ksS -D "$RUNNER_TEMP/first-headers.txt" -o "$RUNNER_TEMP/resized.png" \
-            https://127.0.0.1:18443/77x77/sample.png
+          curl -ksS -D "$RUNNER_TEMP/first-headers.txt" -o "$RUNNER_TEMP/resized.png" https://127.0.0.1:18443/77x77/sample.png
           grep -qi '^X-Cache-Status: MISS' "$RUNNER_TEMP/first-headers.txt"
-          python -c 'import pathlib,struct; data=pathlib.Path("'"$RUNNER_TEMP"'/resized.png").read_bytes(); assert data[:8] == bytes.fromhex("89504e470d0a1a0a"), "response is not PNG"; w,h=struct.unpack(">II",data[16:24]); assert (w,h)==(77,57), f"unexpected resized dimensions: {w}x{h}"; print(f"direct-TLS image resize passed: {w}x{h}")'
-          curl -ksS -D "$RUNNER_TEMP/second-headers.txt" -o "$RUNNER_TEMP/resized-again.png" \
-            https://127.0.0.1:18443/77x77/sample.png
+          python -c 'import pathlib,struct; data=pathlib.Path("'$RUNNER_TEMP'/resized.png").read_bytes(); assert data[:8] == bytes.fromhex("89504e470d0a1a0a"), "response is not PNG"; w,h=struct.unpack(">II",data[16:24]); assert (w,h)==(77,57), f"unexpected resized dimensions: {w}x{h}"'
+          curl -ksS -D "$RUNNER_TEMP/second-headers.txt" -o "$RUNNER_TEMP/resized-again.png" https://127.0.0.1:18443/77x77/sample.png
           grep -qi '^X-Cache-Status: HIT' "$RUNNER_TEMP/second-headers.txt"
           cmp "$RUNNER_TEMP/resized.png" "$RUNNER_TEMP/resized-again.png"
 
@@ -198,15 +191,10 @@ jobs:
           curl -fsS -o /dev/null "$base_url$path"
           for mode in hit bypass unique stampede; do
             report="$RUNNER_TEMP/benchmark-$mode.json"
-            python3 tools/benchmark.py \
-              --base-url "$base_url" --path "$path" \
-              --requests "$requests" --concurrency "$concurrency" \
-              --timeout 3 --mode "$mode" > "$report"
+            python3 tools/benchmark.py --base-url "$base_url" --path "$path" --requests "$requests" --concurrency "$concurrency" --timeout 3 --mode "$mode" > "$report"
             MODE="$mode" REQUESTS="$requests" REPORT="$report" python3 - <<'PY'
-          import json
-          import os
+          import json, os
           from pathlib import Path
-
           mode = os.environ["MODE"]
           expected_requests = int(os.environ["REQUESTS"])
           report = json.loads(Path(os.environ["REPORT"]).read_text())
@@ -218,11 +206,6 @@ jobs:
               expected_cache = {"hit": "HIT", "bypass": "BYPASS", "unique": "MISS"}[mode]
               assert report["cache_status_counts"] == {expected_cache: expected_requests}, report
           assert not report["errors"], report
-          print(
-              f"{mode}: {report['requests_completed']} requests, "
-              f"{report['requests_per_second']} req/s, "
-              f"p95={report['latency_ms']['p95']}ms, cache={report['cache_status_counts']}"
-          )
           PY
           done
       - name: Show logs on failure
