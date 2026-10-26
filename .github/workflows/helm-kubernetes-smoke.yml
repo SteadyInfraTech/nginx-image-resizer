@@ -39,6 +39,13 @@ jobs:
           grep -q 'startupProbe:' "$RUNNER_TEMP/rendered.yaml"
           grep -q 'readinessProbe:' "$RUNNER_TEMP/rendered.yaml"
           grep -q 'livenessProbe:' "$RUNNER_TEMP/rendered.yaml"
+          # Guard the chart's default resource requests and hard limits against accidental removal.
+          grep -q 'cpu: 100m' "$RUNNER_TEMP/rendered.yaml"
+          grep -q 'memory: 128Mi' "$RUNNER_TEMP/rendered.yaml"
+          grep -q 'ephemeral-storage: 64Mi' "$RUNNER_TEMP/rendered.yaml"
+          grep -q 'cpu: "1"' "$RUNNER_TEMP/rendered.yaml"
+          grep -q 'memory: 512Mi' "$RUNNER_TEMP/rendered.yaml"
+          grep -q 'ephemeral-storage: 256Mi' "$RUNNER_TEMP/rendered.yaml"
           helm template resizer charts/nginx-image-resizer --set origin.host=origin --set image.tag=ci --set uriStyle=suffix > "$RUNNER_TEMP/rendered-suffix.yaml"
           grep -q '/_resize/' "$RUNNER_TEMP/rendered-suffix.yaml"
           if helm template resizer charts/nginx-image-resizer --set uriStyle=invalid > /dev/null 2>&1; then echo "invalid uriStyle unexpectedly passed schema validation" >&2; exit 1; fi
