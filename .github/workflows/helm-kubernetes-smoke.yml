@@ -215,7 +215,7 @@ jobs:
           kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=180s
 
           # Bad liveness must trigger a restart without removing healthy old endpoints.
-          kubectl patch deployment/resizer-nginx-image-resizer --type=json -p='[{"op":"replace","path":"/spec/template/spec/containers/0/livenessProbe/httpGet/path","value":"/probe-failure"}]'
+          kubectl patch deployment/resizer-nginx-image-resizer --type=json -p='[{"op":"replace","path":"/spec/template/spec/containers/0/readinessProbe/httpGet/path","value":"/probe-failure"},{"op":"replace","path":"/spec/template/spec/containers/0/livenessProbe/httpGet/path","value":"/probe-failure"}]'
           liveness_seen=0
           for attempt in $(seq 1 35); do
             restarts="$(kubectl get pods -l app.kubernetes.io/instance=resizer,app.kubernetes.io/name=nginx-image-resizer -o jsonpath='{.items[*].status.containerStatuses[0].restartCount}')"
@@ -224,7 +224,7 @@ jobs:
             sleep 2
           done
           test "$liveness_seen" = "1"
-          kubectl patch deployment/resizer-nginx-image-resizer --type=json -p='[{"op":"replace","path":"/spec/template/spec/containers/0/livenessProbe/httpGet/path","value":"/healthz"}]'
+          kubectl patch deployment/resizer-nginx-image-resizer --type=json -p='[{"op":"replace","path":"/spec/template/spec/containers/0/readinessProbe/httpGet/path","value":"/healthz"},{"op":"replace","path":"/spec/template/spec/containers/0/livenessProbe/httpGet/path","value":"/healthz"}]'
           kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=180s
 
           # Prove the previous Helm revision can be restored after an upgrade.
