@@ -5,6 +5,7 @@ ARG NGINX_CACHE_VALIDITY=10m
 ARG NGINX_MAX_CONCURRENT_IMAGE_REQUESTS=16
 ARG NGINX_PUBLIC_HOST=localhost
 ARG NGINX_ORIGIN_UPSTREAM=origin:8081
+ARG NGINX_URI_STYLE=prefix
 
 COPY ${NGINX_CONFIG} /etc/nginx/nginx.conf
 
@@ -12,6 +13,11 @@ RUN set -eu; \
     printf "%s" "${NGINX_MAX_CONCURRENT_IMAGE_REQUESTS}" | grep -Eq "^[1-9][0-9]*$" || { echo "NGINX_MAX_CONCURRENT_IMAGE_REQUESTS must be a positive integer" >&2; exit 1; }; \
     printf "%s" "${NGINX_CACHE_VALIDITY}" | grep -Eq "^[0-9]+(ms|s|m|h|d|w|M|y)$" || { echo "NGINX_CACHE_VALIDITY must be a single NGINX time value, e.g. 10m or 1s" >&2; exit 1; }; \
     printf "%s" "${NGINX_ORIGIN_UPSTREAM}" | grep -Eq "^[A-Za-z0-9.-]+:[0-9]{1,5}$" || { echo "NGINX_ORIGIN_UPSTREAM must be a hostname:port pair" >&2; exit 1; }; \
+    case "${NGINX_URI_STYLE}" in \
+      prefix) sed -i 's#__EDGE_URI_LOCATION__#location ~ ^/(?<edge_width>[1-9][0-9]?[0-9]?|1[0-9][0-9][0-9]|20[0-3][0-9]|204[0-8])x(?<edge_height>[1-9][0-9]?[0-9]?|1[0-9][0-9][0-9]|20[0-3][0-9]|204[0-8])/(?<edge_image_path>.+)$ {#; s#__INTERNAL_URI_LOCATION__#location ~ ^/(?<width>[1-9][0-9]?[0-9]?|1[0-9][0-9][0-9]|20[0-3][0-9]|204[0-8])x(?<height>[1-9][0-9]?[0-9]?|1[0-9][0-9][0-9]|20[0-3][0-9]|204[0-8])/(?<image_path>.+)$ {#' /etc/nginx/nginx.conf ;; \
+      suffix) sed -i 's#__EDGE_URI_LOCATION__#location ~ ^/(?<edge_image_path>.+)/_resize/(?<edge_width>[1-9][0-9]?[0-9]?|1[0-9][0-9][0-9]|20[0-3][0-9]|204[0-8])x(?<edge_height>[1-9][0-9]?[0-9]?|1[0-9][0-9][0-9]|20[0-3][0-9]|204[0-8])$ {#; s#__INTERNAL_URI_LOCATION__#location ~ ^/(?<image_path>.+)/_resize/(?<width>[1-9][0-9]?[0-9]?|1[0-9][0-9][0-9]|20[0-3][0-9]|204[0-8])x(?<height>[1-9][0-9]?[0-9]?|1[0-9][0-9][0-9]|20[0-3][0-9]|204[0-8])$ {#' /etc/nginx/nginx.conf ;; \
+      *) echo "NGINX_URI_STYLE must be prefix or suffix" >&2; exit 1 ;; \
+    esac; \
     apk add --no-cache ca-certificates; \
     mkdir -p /run/nginx /var/cache/nginx/image /var/lib/nginx/logs /var/lib/nginx/tmp; \
     chmod 755 /var/lib/nginx /var/lib/nginx/logs /var/lib/nginx/tmp; \
