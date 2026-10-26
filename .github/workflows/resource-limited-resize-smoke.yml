@@ -22,14 +22,18 @@ jobs:
               memswap_limit: 128m
               cpus: 0.5
           YAML
-          docker compose -f docker-compose.yml -f "$RUNNER_TEMP/limits.yml" config > "$RUNNER_TEMP/rendered.yml"
-          grep -q 'mem_limit: 134217728' "$RUNNER_TEMP/rendered.yml"
-          grep -q 'memswap_limit: 134217728' "$RUNNER_TEMP/rendered.yml"
-          grep -q 'cpus: 0.5' "$RUNNER_TEMP/rendered.yml"
+          docker compose -f docker-compose.yml -f "$RUNNER_TEMP/limits.yml" config --format json > "$RUNNER_TEMP/rendered.json"
+          python3 - "$RUNNER_TEMP/rendered.json" <<'PY'
+          import json, sys
+          service = json.load(open(sys.argv[1]))["services"]["nginx"]
+          for key in ("mem_limit", "memswap_limit"):
+              assert service.get(key) in (128 * 1024 * 1024, "128m", "128M"), (key, service.get(key))
+          assert service.get("cpus") in (0.5, "0.5"), service.get("cpus")
+          print("Compose renders 128 MiB memory/swap and 0.5 CPU limits")
+          PY
       - name: Start bounded resizer and origin
         run: |
           set -eu
-          compose="docker compose -f docker-compose.yml -f $RUNNER_TEMP/limits.yml"
           NGINX_CACHE_VALIDITY=10m NGINX_CACHE_TMPFS_SIZE=32m docker compose -f docker-compose.yml -f "$RUNNER_TEMP/limits.yml" up --build -d nginx origin
           origin_ready=0
           for attempt in $(seq 1 30); do
