@@ -27,6 +27,11 @@ imagePullSecrets: []
 
 podAnnotations: {}
 
+# Opt in only when running enough replicas to satisfy minAvailable during disruptions.
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+
 podSecurityContext:
   runAsNonRoot: true
   runAsUser: 101
