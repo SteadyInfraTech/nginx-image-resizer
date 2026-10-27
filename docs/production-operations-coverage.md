@@ -1,6 +1,6 @@
 # Production operations and failure-recovery coverage
 
-Last reconciled: 2026-10-27. This matrix distinguishes automated checks from deployment-specific validation. A passing CI workflow is evidence for the exact scenario it exercises, not a blanket production-readiness claim.
+Last reconciled: 2026-10-28. This matrix distinguishes automated checks from deployment-specific validation. A passing CI workflow is evidence for the exact scenario it exercises, not a blanket production-readiness claim.
 
 ## Automated CI coverage
 
@@ -31,7 +31,7 @@ Last reconciled: 2026-10-27. This matrix distinguishes automated checks from dep
 | Cache locality across replicas | Helm/kind smoke contacts each pod directly | Helm Kubernetes smoke | A unique URL must be a MISS then HIT on each of two pods, showing each pod owns an independent cache. Does not assert a particular hit ratio through Service load balancing. |
 | Packaged chart install/upgrade | Packaged chart smoke | Helm packaged chart smoke | Exercises the packaged artifact path, not every external release-registry or cluster combination. |
 | Published-image tag selection and smoke | Release validator and published-image workflow | CI, Published image Helm smoke | Pull-request/manual runs exercise the mutable `main` image; after a successful versioned publish, the workflow selects and tests the corresponding semantic-version tag. The smoke uses a tag rather than pinning the image digest, so it does not prove artifact immutability. Neither path replaces a customer-environment installation rehearsal. |
-| Egress NetworkPolicy enforcement | `.github/workflows/network-policy-enforcement.yml` installs Calico in kind, enables the chart policy, verifies resize through the configured origin, and confirms a disallowed Service is unreachable | Network policy enforcement | This is a real enforcement test, not just YAML rendering. It covers an in-cluster origin selector and CoreDNS; external-origin CIDRs and customer-cluster policy interactions need separate validation. |
+| Egress NetworkPolicy enforcement | `.github/workflows/network-policy-enforcement.yml` installs Calico in kind, enables the chart policy, verifies resize through the configured origin, and confirms both a disallowed Service and a same-label origin in an unrelated namespace are unreachable | Network policy enforcement | This is a real enforcement test, not just YAML rendering. The cross-namespace look-alike guards the namespace-selector boundary; external-origin CIDRs and customer-cluster policy interactions need separate validation. |
 
 ## Deployment-specific validation
 
