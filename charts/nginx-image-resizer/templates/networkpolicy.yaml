@@ -1,5 +1,7 @@
-{{- if .Values.networkPolicy.enabled }}
-{{- $originNamespaceLabels := .Values.networkPolicy.origin.namespaceLabels | default (dict "kubernetes.io/metadata.name" .Release.Namespace) }}
+{{- $networkPolicy := .Values.networkPolicy | default dict }}
+{{- $networkOrigin := $networkPolicy.origin | default dict }}
+{{- if ($networkPolicy.enabled | default false) }}
+{{- $originNamespaceLabels := $networkOrigin.namespaceLabels | default (dict "kubernetes.io/metadata.name" .Release.Namespace) }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -21,7 +23,7 @@ spec:
               {{- toYaml $originNamespaceLabels | nindent 14 }}
           podSelector:
             matchLabels:
-              {{- toYaml .Values.networkPolicy.origin.podLabels | nindent 14 }}
+              {{- toYaml $networkOrigin.podLabels | nindent 14 }}
       ports:
         - protocol: TCP
           port: {{ .Values.origin.port }}
@@ -38,7 +40,7 @@ spec:
           port: 53
         - protocol: TCP
           port: 53
-    {{- with .Values.networkPolicy.extraEgress }}
+    {{- with $networkPolicy.extraEgress }}
     # Optional additional egress rules for external origins or required services.
     {{- toYaml . | nindent 4 }}
     {{- end }}
