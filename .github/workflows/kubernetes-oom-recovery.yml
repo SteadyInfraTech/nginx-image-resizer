@@ -1,0 +1,97 @@
+name: Kubernetes OOM restart recovery
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  oom-restart-recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.17.3
+      - name: Create kind cluster
+        uses: helm/kind-action@v1.12.0
+        with:
+          cluster_name: image-resizer-oom
+      - name: Build and load application and test-origin images
+        run: |
+          docker build -t steady-image-resizer:ci .
+          docker build -f demo/Dockerfile -t steady-image-resizer-demo-origin:ci .
+          kind load docker-image --name image-resizer-oom steady-image-resizer:ci
+          kind load docker-image --name image-resizer-oom steady-image-resizer-demo-origin:ci
+      - name: Install origin and resizer
+        run: |
+          set -eu
+          kubectl create deployment origin --image=steady-image-resizer-demo-origin:ci
+          kubectl expose deployment origin --port=8081 --target-port=8081
+          kubectl rollout status deployment/origin --timeout=120s
+          helm upgrade --install resizer charts/nginx-image-resizer \
+            --set image.repository=steady-image-resizer \
+            --set image.tag=ci \
+            --set image.pullPolicy=IfNotPresent \
+            --set origin.host=origin \
+            --set replicaCount=1 \
+            --wait --timeout=180s
+          kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=120s
+          kubectl get deployment resizer-nginx-image-resizer
+      - name: Inject a bounded-memory OOM and verify Kubernetes restart
+        run: |
+          set -eu
+          deployment=resizer-nginx-image-resizer
+          selector='app.kubernetes.io/instance=resizer,app.kubernetes.io/name=nginx-image-resizer'
+          pod="$(kubectl get pods -l "$selector" -o jsonpath='{.items[0].metadata.name}')"
+          test -n "$pod"
+
+          # Replace the container process with an intentionally memory-growing shell
+          # and lower its memory limit. This is a controlled fault injection, not a
+          # claim that ordinary image resizing should OOM at the chart defaults.
+          kubectl patch deployment "$deployment" --type=json -p='[
+            {"op":"replace","path":"/spec/template/spec/containers/0/command","value":["/bin/sh","-c"]},
+            {"op":"replace","path":"/spec/template/spec/containers/0/args","value":["x=x; while true; do x=\"$x$x\"; done"]},
+            {"op":"replace","path":"/spec/template/spec/containers/0/resources/limits/memory","value":"64Mi"}
+          ]'
+          kubectl rollout status deployment/"$deployment" --timeout=120s || true
+
+          oom_seen=0
+          for attempt in $(seq 1 60); do
+            pod="$(kubectl get pods -l "$selector" -o jsonpath='{.items[0].metadata.name}')"
+            restart_count="$(kubectl get pod "$pod" -o jsonpath='{.status.containerStatuses[0].restartCount}')"
+            last_reason="$(kubectl get pod "$pod" -o jsonpath='{.status.containerStatuses[0].lastState.terminated.reason}')"
+            if [ "${restart_count:-0}" -ge 1 ] && [ "$last_reason" = "OOMKilled" ]; then
+              oom_seen=1
+              break
+            fi
+            sleep 2
+          done
+          test "$oom_seen" = "1"
+          echo "Observed OOMKilled termination and Kubernetes container restart."
+
+          # Restore the chart's declared application command and resources. The
+          # Helm upgrade must replace the fault-injected pod with a healthy NGINX pod.
+          helm upgrade resizer charts/nginx-image-resizer \
+            --set image.repository=steady-image-resizer \
+            --set image.tag=ci \
+            --set image.pullPolicy=IfNotPresent \
+            --set origin.host=origin \
+            --set replicaCount=1 \
+            --wait --timeout=180s
+          kubectl rollout status deployment/"$deployment" --timeout=120s
+          kubectl wait --for=condition=Ready pod -l "$selector" --timeout=120s
+          kubectl exec deployment/origin -- python -c "import struct; from urllib.request import urlopen; data=urlopen('http://resizer-nginx-image-resizer:8080/77x77/sample.png?oom-recovery=1', timeout=10).read(); assert data[:8] == bytes.fromhex('89504e470d0a1a0a'), 'response is not PNG'; width,height=struct.unpack('>II', data[16:24]); assert (width,height)==(77,57), f'unexpected dimensions: {width}x{height}'"
+          echo "Resizer recovered after OOM fault injection and served a valid resized image."
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          kubectl get pods -o wide || true
+          kubectl get events --sort-by=.lastTimestamp || true
+          kubectl describe pods || true
+          kubectl logs deployment/resizer-nginx-image-resizer --all-containers=true --tail=200 || true
