@@ -84,9 +84,10 @@ jobs:
             sleep 1
           done
           test "$baseline_ready" = "1"
-          # Strict spread establishes the test baseline; relax it afterward so the evicted
-          # replica can recover on the surviving worker while the drained node is cordoned.
-          kubectl patch deployment resizer-nginx-image-resizer --type=merge -p='{"spec":{"template":{"spec":{"topologySpreadConstraints":[{"maxSkew":1,"topologyKey":"kubernetes.io/hostname","whenUnsatisfiable":"ScheduleAnyway","labelSelector":{"matchLabels":{"app.kubernetes.io/instance":"resizer","app.kubernetes.io/name":"nginx-image-resizer"}}}]}}}}'
+          # Strict spread establishes the test baseline. Remove the constraint completely
+          # before draining: ScheduleAnyway can still preserve an existing skew when
+          # the only other eligible worker becomes unschedulable.
+          kubectl patch deployment resizer-nginx-image-resizer --type=merge -p='{"spec":{"template":{"spec":{"topologySpreadConstraints":[]}}}}'
           kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=180s
           kubectl wait --for=jsonpath='{.status.readyReplicas}'=2 deployment/resizer-nginx-image-resizer --timeout=120s
           kubectl wait --for=jsonpath='{.status.disruptionsAllowed}'=1 pdb/resizer-nginx-image-resizer --timeout=60s
