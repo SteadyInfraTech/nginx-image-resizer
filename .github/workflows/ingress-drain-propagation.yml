@@ -78,7 +78,6 @@ jobs:
                           port:
                             number: 8080
           EOF
-          kubectl wait --for=jsonpath='{.status.loadBalancer}'= ingress/resizer --timeout=60s || true
       - name: Verify ingress routing and pod replacement without request failures
         shell: bash
         run: |
