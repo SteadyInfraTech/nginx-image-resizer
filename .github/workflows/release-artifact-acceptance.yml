@@ -49,11 +49,40 @@ jobs:
             echo "from_version and to_version must differ" >&2
             exit 1
           }
-          newest="$(printf '%s\n' "$FROM_VERSION" "$TO_VERSION" | sort -V | tail -n1)"
-          [[ "$newest" == "$TO_VERSION" ]] || {
-            echo "to_version must be newer than from_version" >&2
-            exit 1
-          }
+          # Compare SemVer precedence (including prereleases); ignore build metadata.
+          python3 - "$FROM_VERSION" "$TO_VERSION" <<'PY'
+          import re, sys
+          pattern = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$")
+          def parse(value):
+              match = pattern.fullmatch(value)
+              if not match:
+                  raise SystemExit(f"Invalid SemVer: {value}")
+              major, minor, patch, pre = match.groups()
+              identifiers = pre.split(".") if pre else None
+              if identifiers:
+                  for item in identifiers:
+                      if not item or (item.isdigit() and len(item) > 1 and item.startswith("0")):
+                          raise SystemExit(f"Invalid SemVer prerelease identifier: {value}")
+              return (int(major), int(minor), int(patch), identifiers)
+          def compare(a, b):
+              if a[:3] != b[:3]:
+                  return (a[:3] > b[:3]) - (a[:3] < b[:3])
+              ap, bp = a[3], b[3]
+              if ap is None or bp is None:
+                  return 0 if ap is None and bp is None else (1 if ap is None else -1)
+              for x, y in zip(ap, bp):
+                  if x == y:
+                      continue
+                  xn, yn = x.isdigit(), y.isdigit()
+                  if xn and yn:
+                      return (int(x) > int(y)) - (int(x) < int(y))
+                  if xn != yn:
+                      return -1 if xn else 1
+                  return (x > y) - (x < y)
+              return (len(ap) > len(bp)) - (len(ap) < len(bp))
+          if compare(parse(sys.argv[1]), parse(sys.argv[2])) >= 0:
+              raise SystemExit("to_version must have higher SemVer precedence than from_version")
+          PY
           mkdir -p "$RUNNER_TEMP/release-charts/from" "$RUNNER_TEMP/release-charts/to"
           gh release download "v$FROM_VERSION" --repo "$GITHUB_REPOSITORY" \
             --pattern "nginx-image-resizer-$FROM_VERSION.tgz" --dir "$RUNNER_TEMP/release-charts/from"
@@ -111,6 +140,16 @@ jobs:
           kubectl create deployment origin --image=steady-image-resizer-demo-origin:release-acceptance
           kubectl expose deployment origin --port=8081 --target-port=8081
           kubectl rollout status deployment/origin --timeout=120s
+      - name: Create image pull secret for GHCR
+        env:
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          kubectl create secret docker-registry ghcr-pull-secret \
+            --docker-server=ghcr.io \
+            --docker-username="$GHCR_USERNAME" \
+            --docker-password="$GHCR_TOKEN"
       - name: Install published release and verify resize plus cache
         env:
           VERSION: ${{ inputs.from_version }}
@@ -120,6 +159,7 @@ jobs:
           helm upgrade --install resizer "$RUNNER_TEMP/release-charts/from/nginx-image-resizer-$VERSION.tgz" \
             --set image.repository=ghcr.io/steadyinfratech/nginx-image-resizer \
             --set image.tag="$VERSION" --set image.digest="$DIGEST" --set image.pullPolicy=IfNotPresent \
+            --set imagePullSecrets[0].name=ghcr-pull-secret \
             --set origin.host=origin --set origin.port=8081 --set replicaCount=1 \
             --wait --timeout 5m
           kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=120s
@@ -154,6 +194,7 @@ jobs:
           helm upgrade resizer "$RUNNER_TEMP/release-charts/to/nginx-image-resizer-$VERSION.tgz" \
             --set image.repository=ghcr.io/steadyinfratech/nginx-image-resizer \
             --set image.tag="$VERSION" --set image.digest="$DIGEST" --set image.pullPolicy=IfNotPresent \
+            --set imagePullSecrets[0].name=ghcr-pull-secret \
             --set origin.host=origin --set origin.port=8081 --set replicaCount=1 \
             --wait --timeout 5m
           kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=120s
