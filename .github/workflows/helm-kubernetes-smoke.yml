@@ -50,6 +50,470 @@ jobs:
           grep -q '/_resize/' "$RUNNER_TEMP/rendered-suffix.yaml"
           if helm template resizer charts/nginx-image-resizer --set uriStyle=invalid > /dev/null 2>&1; then echo "invalid uriStyle unexpectedly passed schema validation" >&2; exit 1; fi
           if grep -Fq 'location ~ ^/(?<edge_width>' "$RUNNER_TEMP/rendered-suffix.yaml"; then echo "prefix route unexpectedly rendered for suffix style" >&2; exit 1; fi
+          # NetworkPolicy is opt-in and must render the expected origin/DNS egress allowlist.
+          helm template resizer charts/nginx-image-resizer --set origin.host=origin --set image.tag=ci --set networkPolicy.enabled=true --set networkPolicy.origin.namespaceLabels.kubernetes\\.io/metadata\\.name=default > "$RUNNER_TEMP/rendered-network-policy.yaml"
+          grep -q '^kind: NetworkPolicy      - name: Build and load application and test-origin images
+        run: |
+          docker build -t steady-image-resizer:ci .
+          docker build -f demo/Dockerfile -t steady-image-resizer-demo-origin:ci .
+          kind load docker-image --name image-resizer steady-image-resizer:ci
+          kind load docker-image --name image-resizer steady-image-resizer-demo-origin:ci
+      - name: Install test origin and chart
+        run: |
+          kubectl create deployment origin --image=steady-image-resizer-demo-origin:ci
+          kubectl expose deployment origin --port=8081 --target-port=8081
+          kubectl rollout status deployment/origin --timeout=120s
+          helm upgrade --install resizer charts/nginx-image-resizer \
+            --set image.repository=steady-image-resizer \
+            --set image.tag=ci \
+            --set image.pullPolicy=IfNotPresent \
+            --set origin.host=origin \
+            --set replicaCount=1
+          kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=120s
+      - name: Diagnose Kubernetes startup failures
+        if: failure()
+        run: |
+          kubectl get pods -o wide || true
+          kubectl get events --sort-by=.lastTimestamp || true
+          kubectl describe pods || true
+          kubectl logs deployment/resizer-nginx-image-resizer --all-containers=true --tail=200 || true
+          kubectl logs deployment/origin --all-containers=true --tail=100 || true
+      - name: Verify resize, cache hit, upgrade, pod recovery, and rollback
+        run: |
+          set -eu
+          port_forward_pid=""
+          start_port_forward() {
+            if [ -n "$port_forward_pid" ]; then kill "$port_forward_pid" 2>/dev/null || true; wait "$port_forward_pid" 2>/dev/null || true; fi
+            kubectl port-forward service/resizer-nginx-image-resizer 18080:8080 > "$RUNNER_TEMP/port-forward.log" 2>&1 &
+            port_forward_pid=$!
+            ready=0
+            for attempt in $(seq 1 30); do
+              if curl -fsS http://127.0.0.1:18080/healthz >/dev/null; then ready=1; break; fi
+              sleep 1
+            done
+            test "$ready" = "1"
+          }
+          cleanup() { if [ -n "$port_forward_pid" ]; then kill "$port_forward_pid" 2>/dev/null || true; fi; }
+          trap cleanup EXIT
+          start_port_forward
+          curl -fsS -D "$RUNNER_TEMP/first.headers" -o "$RUNNER_TEMP/resized.png" http://127.0.0.1:18080/77x77/sample.png
+          grep -qi '^X-Cache-Status: MISS' "$RUNNER_TEMP/first.headers"
+          curl -fsS -D "$RUNNER_TEMP/second.headers" -o "$RUNNER_TEMP/resized-again.png" http://127.0.0.1:18080/77x77/sample.png
+          grep -qi '^X-Cache-Status: HIT' "$RUNNER_TEMP/second.headers"
+          cmp "$RUNNER_TEMP/resized.png" "$RUNNER_TEMP/resized-again.png"
+          python3 - "$RUNNER_TEMP/resized.png" <<'PY'
+          import struct, sys
+          data = open(sys.argv[1], "rb").read()
+          assert data[:8] == bytes.fromhex("89504e470d0a1a0a"), "response is not PNG"
+          width, height = struct.unpack(">II", data[16:24])
+          assert (width, height) == (77, 57), f"unexpected dimensions: {width}x{height}"
+          print(f"kind smoke passed: {width}x{height}, cache miss/hit verified")
+          PY
+          checksum_before_uri_change="$(kubectl get deployment resizer-nginx-image-resizer -o go-template='{{ index .spec.template.metadata.annotations "checksum/config" }}')"
+          helm upgrade resizer charts/nginx-image-resizer \
+            --set image.repository=steady-image-resizer \
+            --set image.tag=ci \
+            --set image.pullPolicy=IfNotPresent \
+            --set origin.host=origin \
+            --set uriStyle=suffix \
+            --set replicaCount=1 \
+            --wait --timeout=180s
+          checksum_after_uri_change="$(kubectl get deployment resizer-nginx-image-resizer -o go-template='{{ index .spec.template.metadata.annotations "checksum/config" }}')"
+          test -n "$checksum_before_uri_change"
+          test -n "$checksum_after_uri_change"
+          test "$checksum_before_uri_change" != "$checksum_after_uri_change"
+          kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=120s
+          echo "ConfigMap checksum changed and rollout completed after URI-style update."
+          start_port_forward
+          curl -fsS -D "$RUNNER_TEMP/suffix-first.headers" -o "$RUNNER_TEMP/suffix.png" http://127.0.0.1:18080/sample.png/_resize/77x77
+          grep -qi '^X-Cache-Status: MISS' "$RUNNER_TEMP/suffix-first.headers"
+          curl -fsS -D "$RUNNER_TEMP/suffix-second.headers" -o "$RUNNER_TEMP/suffix-again.png" http://127.0.0.1:18080/sample.png/_resize/77x77
+          grep -qi '^X-Cache-Status: HIT' "$RUNNER_TEMP/suffix-second.headers"
+          cmp "$RUNNER_TEMP/suffix.png" "$RUNNER_TEMP/suffix-again.png"
+          helm upgrade resizer charts/nginx-image-resizer \
+            --set image.repository=steady-image-resizer \
+            --set image.tag=ci \
+            --set image.pullPolicy=IfNotPresent \
+            --set origin.host=origin \
+            --set replicaCount=2 \
+            --wait --timeout=180s
+          kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=180s
+          start_port_forward
+          test "$(kubectl get deployment resizer-nginx-image-resizer -o jsonpath='{.spec.replicas}')" = "2"
+          curl -fsS http://127.0.0.1:18080/healthz >/dev/null
+
+          # Verify that the two replicas maintain independent local caches. Contact each
+          # pod directly so Service load balancing cannot mask replica-local behavior.
+          for pod in $(kubectl get pods -l app.kubernetes.io/instance=resizer,app.kubernetes.io/name=nginx-image-resizer -o jsonpath='{.items[*].metadata.name}'); do
+            kubectl port-forward "pod/$pod" 18081:8080 > "$RUNNER_TEMP/port-forward-$pod.log" 2>&1 &
+            pod_port_forward_pid=$!
+            pod_ready=0
+            for attempt in $(seq 1 30); do
+              if curl -fsS http://127.0.0.1:18081/healthz >/dev/null; then pod_ready=1; break; fi
+              sleep 1
+            done
+            test "$pod_ready" = "1"
+            locality_url="http://127.0.0.1:18081/77x77/sample.png?replica-locality=$GITHUB_RUN_ID"
+            curl -fsS -D "$RUNNER_TEMP/$pod-locality-first.headers" -o "$RUNNER_TEMP/$pod-locality-first.png" "$locality_url"
+            grep -qi '^X-Cache-Status: MISS' "$RUNNER_TEMP/$pod-locality-first.headers"
+            curl -fsS -D "$RUNNER_TEMP/$pod-locality-second.headers" -o "$RUNNER_TEMP/$pod-locality-second.png" "$locality_url"
+            grep -qi '^X-Cache-Status: HIT' "$RUNNER_TEMP/$pod-locality-second.headers"
+            cmp "$RUNNER_TEMP/$pod-locality-first.png" "$RUNNER_TEMP/$pod-locality-second.png"
+            kill "$pod_port_forward_pid" 2>/dev/null || true
+            wait "$pod_port_forward_pid" 2>/dev/null || true
+            echo "Replica-local cache MISS/HIT verified on $pod"
+          done
+
+          # Delete one serving pod and prove the Service still handles new
+          # requests through the surviving replica while Kubernetes replaces it.
+          victim="$(kubectl get pods -l app.kubernetes.io/instance=resizer,app.kubernetes.io/name=nginx-image-resizer -o jsonpath='{.items[0].metadata.name}')"
+          test -n "$victim"
+          kubectl delete pod "$victim" --wait=false
+          # Exercise the real in-cluster Service DNS/load-balancing path from
+          # the origin pod. kubectl port-forward service/... can remain pinned
+          # to the deleted pod and is not a reliable Service failover probe.
+          for request_id in $(seq 1 10); do
+            kubectl exec deployment/origin -- python -c "import struct; from urllib.request import urlopen; data=urlopen('http://resizer-nginx-image-resizer:8080/77x77/sample.png?pod-recovery=$request_id', timeout=5).read(); assert data[:8] == bytes.fromhex('89504e470d0a1a0a'), 'response is not PNG'; width,height=struct.unpack('>II', data[16:24]); assert (width,height)==(77,57), f'unexpected dimensions: {width}x{height}'"
+          done
+          kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=180s
+          test "$(kubectl get deployment resizer-nginx-image-resizer -o jsonpath='{.status.readyReplicas}')" = "2"
+          echo "pod replacement smoke passed: 10 image requests succeeded while one replica was deleted"
+
+          # Exercise the no-ready-endpoint state explicitly. Scaling to zero is
+          # deterministic in kind and verifies that the Service has no stale
+          # endpoints, then that traffic recovers when replicas return. This is
+          # endpoint outage/recovery coverage, not a substitute for a rolling
+          # upgrade test with no ready endpoints.
+          kubectl scale deployment/resizer-nginx-image-resizer --replicas=0
+          kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=120s
+          endpoints_empty=0
+          for attempt in $(seq 1 30); do
+            endpoint_ips="$(kubectl get endpoints resizer-nginx-image-resizer -o jsonpath='{.subsets[*].addresses[*].ip}')"
+            if [ -z "$endpoint_ips" ]; then endpoints_empty=1; break; fi
+            sleep 1
+          done
+          test "$endpoints_empty" = "1"
+          echo "Service correctly has no ready endpoints at zero replicas."
+          kubectl scale deployment/resizer-nginx-image-resizer --replicas=2
+          kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=180s
+          test "$(kubectl get deployment resizer-nginx-image-resizer -o jsonpath='{.status.readyReplicas}')" = "2"
+          # Assert EndpointSlice/Service discovery is populated and exercise the
+          # actual in-cluster Service DNS path, not kubectl port-forward (which
+          # selects a pod and can bypass the Service data path).
+          endpoint_ips=""
+          for attempt in $(seq 1 30); do
+            endpoint_ips="$(kubectl get endpoints resizer-nginx-image-resizer -o jsonpath='{.subsets[*].addresses[*].ip}')"
+            if [ -n "$endpoint_ips" ]; then break; fi
+            sleep 1
+          done
+          test -n "$endpoint_ips"
+          # Endpoint readiness can precede convergence of the cluster data plane.
+          # Retry the real Service DNS request briefly rather than failing on a
+          # transient connection refusal immediately after scaling from zero.
+          recovery_request_ok=0
+          for attempt in $(seq 1 15); do
+            if kubectl exec deployment/origin -- python -c "import struct; from urllib.request import urlopen; data=urlopen('http://resizer-nginx-image-resizer:8080/77x77/sample.png?zero-endpoint-recovery=1', timeout=5).read(); assert data[:8] == bytes.fromhex('89504e470d0a1a0a'), 'response is not PNG'; width,height=struct.unpack('>II', data[16:24]); assert (width,height)==(77,57), f'unexpected dimensions: {width}x{height}'" 2>"$RUNNER_TEMP/zero-endpoint-request.err"; then
+              recovery_request_ok=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$recovery_request_ok" != "1" ]; then
+            cat "$RUNNER_TEMP/zero-endpoint-request.err" >&2
+            echo "Service request did not recover after zero-endpoint interval" >&2
+            exit 1
+          fi
+          echo "Service routing recovered after zero-endpoint interval"
+
+          # Simulate a broken rolling-upgrade revision with an image that cannot be pulled.
+          # The chart's maxUnavailable=0/maxSurge=1 policy must preserve the old ready pods
+          # and Service endpoints until the new revision can become healthy.
+          kubectl set image deployment/resizer-nginx-image-resizer nginx=steady-image-resizer:missing-rolling-upgrade-fixture
+          bad_revision_seen=0
+          for attempt in $(seq 1 30); do
+            bad_pods="$(kubectl get pods -l app.kubernetes.io/instance=resizer,app.kubernetes.io/name=nginx-image-resizer -o jsonpath='{.items[*].spec.containers[0].image}')"
+            endpoint_ips="$(kubectl get endpoints resizer-nginx-image-resizer -o jsonpath='{.subsets[*].addresses[*].ip}')"
+            if echo "$bad_pods" | grep -q 'missing-rolling-upgrade-fixture' && [ -n "$endpoint_ips" ]; then
+              set -- $endpoint_ips
+              if [ "$#" -ge 2 ]; then bad_revision_seen=1; break; fi
+            fi
+            sleep 2
+          done
+          test "$bad_revision_seen" = "1"
+          kubectl exec deployment/origin -- python -c "import struct; from urllib.request import urlopen; data=urlopen('http://resizer-nginx-image-resizer:8080/77x77/sample.png?failed-upgrade-preserves-capacity=1', timeout=10).read(); assert data[:8] == bytes.fromhex('89504e470d0a1a0a'), 'response is not PNG'; width,height=struct.unpack('>II', data[16:24]); assert (width,height)==(77,57), f'unexpected dimensions: {width}x{height}'"
+          echo "Failed rolling-upgrade revision did not remove ready Service capacity; image request still succeeded."
+          # Reconcile the failed manual image change back to the chart's known-good image.
+          helm upgrade resizer charts/nginx-image-resizer --set image.repository=steady-image-resizer --set image.tag=ci --set image.pullPolicy=IfNotPresent --set origin.host=origin --set uriStyle=prefix --set replicaCount=2 --wait --timeout=180s
+          kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=180s
+          test "$(kubectl get deployment resizer-nginx-image-resizer -o jsonpath='{.status.readyReplicas}')" = "2"
+          echo "Rolling-upgrade recovery passed: restored healthy revision with two ready replicas."
+
+          # Bad readiness must keep new pods out of endpoints while old replicas serve.
+          kubectl patch deployment/resizer-nginx-image-resizer --type=json -p='[{"op":"replace","path":"/spec/template/spec/containers/0/readinessProbe/httpGet/path","value":"/probe-failure"}]'
+          readiness_seen=0
+          for attempt in $(seq 1 30); do
+            ready="$(kubectl get pods -l app.kubernetes.io/instance=resizer,app.kubernetes.io/name=nginx-image-resizer -o jsonpath='{.items[*].status.containerStatuses[0].ready}')"
+            endpoints="$(kubectl get endpoints resizer-nginx-image-resizer -o jsonpath='{.subsets[*].addresses[*].ip}')"
+            if echo "$ready" | grep -qw false && [ -n "$endpoints" ]; then readiness_seen=1; break; fi
+            sleep 2
+          done
+          test "$readiness_seen" = "1"
+          kubectl patch deployment/resizer-nginx-image-resizer --type=json -p='[{"op":"replace","path":"/spec/template/spec/containers/0/readinessProbe/httpGet/path","value":"/healthz"}]'
+          kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=180s
+
+          # Bad liveness must trigger a restart without removing healthy old endpoints.
+          kubectl patch deployment/resizer-nginx-image-resizer --type=json -p='[{"op":"replace","path":"/spec/template/spec/containers/0/readinessProbe/httpGet/path","value":"/probe-failure"},{"op":"replace","path":"/spec/template/spec/containers/0/livenessProbe/httpGet/path","value":"/probe-failure"}]'
+          liveness_seen=0
+          for attempt in $(seq 1 35); do
+            restarts="$(kubectl get pods -l app.kubernetes.io/instance=resizer,app.kubernetes.io/name=nginx-image-resizer -o jsonpath='{.items[*].status.containerStatuses[0].restartCount}')"
+            endpoints="$(kubectl get endpoints resizer-nginx-image-resizer -o jsonpath='{.subsets[*].addresses[*].ip}')"
+            if echo "$restarts" | grep -Eq '(^| )([1-9][0-9]*)( |$)' && [ -n "$endpoints" ]; then liveness_seen=1; break; fi
+            sleep 2
+          done
+          test "$liveness_seen" = "1"
+          kubectl patch deployment/resizer-nginx-image-resizer --type=json -p='[{"op":"replace","path":"/spec/template/spec/containers/0/readinessProbe/httpGet/path","value":"/healthz"},{"op":"replace","path":"/spec/template/spec/containers/0/livenessProbe/httpGet/path","value":"/healthz"}]'
+          kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=180s
+
+          # Prove the previous Helm revision can be restored after an upgrade.
+          helm rollback resizer 1 --wait --timeout=180s
+          kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=120s
+          start_port_forward
+          test "$(kubectl get deployment resizer-nginx-image-resizer -o jsonpath='{.spec.replicas}')" = "1"
+          curl -fsS http://127.0.0.1:18080/healthz >/dev/null
+          curl -fsS -o /dev/null http://127.0.0.1:18080/77x77/sample.png
+ "$RUNNER_TEMP/rendered-network-policy.yaml"
+          grep -q 'k8s-app: kube-dns' "$RUNNER_TEMP/rendered-network-policy.yaml"
+          grep -q 'port: 8081' "$RUNNER_TEMP/rendered-network-policy.yaml"
+          if grep -q '^kind: NetworkPolicy      - name: Build and load application and test-origin images
+        run: |
+          docker build -t steady-image-resizer:ci .
+          docker build -f demo/Dockerfile -t steady-image-resizer-demo-origin:ci .
+          kind load docker-image --name image-resizer steady-image-resizer:ci
+          kind load docker-image --name image-resizer steady-image-resizer-demo-origin:ci
+      - name: Install test origin and chart
+        run: |
+          kubectl create deployment origin --image=steady-image-resizer-demo-origin:ci
+          kubectl expose deployment origin --port=8081 --target-port=8081
+          kubectl rollout status deployment/origin --timeout=120s
+          helm upgrade --install resizer charts/nginx-image-resizer \
+            --set image.repository=steady-image-resizer \
+            --set image.tag=ci \
+            --set image.pullPolicy=IfNotPresent \
+            --set origin.host=origin \
+            --set replicaCount=1
+          kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=120s
+      - name: Diagnose Kubernetes startup failures
+        if: failure()
+        run: |
+          kubectl get pods -o wide || true
+          kubectl get events --sort-by=.lastTimestamp || true
+          kubectl describe pods || true
+          kubectl logs deployment/resizer-nginx-image-resizer --all-containers=true --tail=200 || true
+          kubectl logs deployment/origin --all-containers=true --tail=100 || true
+      - name: Verify resize, cache hit, upgrade, pod recovery, and rollback
+        run: |
+          set -eu
+          port_forward_pid=""
+          start_port_forward() {
+            if [ -n "$port_forward_pid" ]; then kill "$port_forward_pid" 2>/dev/null || true; wait "$port_forward_pid" 2>/dev/null || true; fi
+            kubectl port-forward service/resizer-nginx-image-resizer 18080:8080 > "$RUNNER_TEMP/port-forward.log" 2>&1 &
+            port_forward_pid=$!
+            ready=0
+            for attempt in $(seq 1 30); do
+              if curl -fsS http://127.0.0.1:18080/healthz >/dev/null; then ready=1; break; fi
+              sleep 1
+            done
+            test "$ready" = "1"
+          }
+          cleanup() { if [ -n "$port_forward_pid" ]; then kill "$port_forward_pid" 2>/dev/null || true; fi; }
+          trap cleanup EXIT
+          start_port_forward
+          curl -fsS -D "$RUNNER_TEMP/first.headers" -o "$RUNNER_TEMP/resized.png" http://127.0.0.1:18080/77x77/sample.png
+          grep -qi '^X-Cache-Status: MISS' "$RUNNER_TEMP/first.headers"
+          curl -fsS -D "$RUNNER_TEMP/second.headers" -o "$RUNNER_TEMP/resized-again.png" http://127.0.0.1:18080/77x77/sample.png
+          grep -qi '^X-Cache-Status: HIT' "$RUNNER_TEMP/second.headers"
+          cmp "$RUNNER_TEMP/resized.png" "$RUNNER_TEMP/resized-again.png"
+          python3 - "$RUNNER_TEMP/resized.png" <<'PY'
+          import struct, sys
+          data = open(sys.argv[1], "rb").read()
+          assert data[:8] == bytes.fromhex("89504e470d0a1a0a"), "response is not PNG"
+          width, height = struct.unpack(">II", data[16:24])
+          assert (width, height) == (77, 57), f"unexpected dimensions: {width}x{height}"
+          print(f"kind smoke passed: {width}x{height}, cache miss/hit verified")
+          PY
+          checksum_before_uri_change="$(kubectl get deployment resizer-nginx-image-resizer -o go-template='{{ index .spec.template.metadata.annotations "checksum/config" }}')"
+          helm upgrade resizer charts/nginx-image-resizer \
+            --set image.repository=steady-image-resizer \
+            --set image.tag=ci \
+            --set image.pullPolicy=IfNotPresent \
+            --set origin.host=origin \
+            --set uriStyle=suffix \
+            --set replicaCount=1 \
+            --wait --timeout=180s
+          checksum_after_uri_change="$(kubectl get deployment resizer-nginx-image-resizer -o go-template='{{ index .spec.template.metadata.annotations "checksum/config" }}')"
+          test -n "$checksum_before_uri_change"
+          test -n "$checksum_after_uri_change"
+          test "$checksum_before_uri_change" != "$checksum_after_uri_change"
+          kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=120s
+          echo "ConfigMap checksum changed and rollout completed after URI-style update."
+          start_port_forward
+          curl -fsS -D "$RUNNER_TEMP/suffix-first.headers" -o "$RUNNER_TEMP/suffix.png" http://127.0.0.1:18080/sample.png/_resize/77x77
+          grep -qi '^X-Cache-Status: MISS' "$RUNNER_TEMP/suffix-first.headers"
+          curl -fsS -D "$RUNNER_TEMP/suffix-second.headers" -o "$RUNNER_TEMP/suffix-again.png" http://127.0.0.1:18080/sample.png/_resize/77x77
+          grep -qi '^X-Cache-Status: HIT' "$RUNNER_TEMP/suffix-second.headers"
+          cmp "$RUNNER_TEMP/suffix.png" "$RUNNER_TEMP/suffix-again.png"
+          helm upgrade resizer charts/nginx-image-resizer \
+            --set image.repository=steady-image-resizer \
+            --set image.tag=ci \
+            --set image.pullPolicy=IfNotPresent \
+            --set origin.host=origin \
+            --set replicaCount=2 \
+            --wait --timeout=180s
+          kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=180s
+          start_port_forward
+          test "$(kubectl get deployment resizer-nginx-image-resizer -o jsonpath='{.spec.replicas}')" = "2"
+          curl -fsS http://127.0.0.1:18080/healthz >/dev/null
+
+          # Verify that the two replicas maintain independent local caches. Contact each
+          # pod directly so Service load balancing cannot mask replica-local behavior.
+          for pod in $(kubectl get pods -l app.kubernetes.io/instance=resizer,app.kubernetes.io/name=nginx-image-resizer -o jsonpath='{.items[*].metadata.name}'); do
+            kubectl port-forward "pod/$pod" 18081:8080 > "$RUNNER_TEMP/port-forward-$pod.log" 2>&1 &
+            pod_port_forward_pid=$!
+            pod_ready=0
+            for attempt in $(seq 1 30); do
+              if curl -fsS http://127.0.0.1:18081/healthz >/dev/null; then pod_ready=1; break; fi
+              sleep 1
+            done
+            test "$pod_ready" = "1"
+            locality_url="http://127.0.0.1:18081/77x77/sample.png?replica-locality=$GITHUB_RUN_ID"
+            curl -fsS -D "$RUNNER_TEMP/$pod-locality-first.headers" -o "$RUNNER_TEMP/$pod-locality-first.png" "$locality_url"
+            grep -qi '^X-Cache-Status: MISS' "$RUNNER_TEMP/$pod-locality-first.headers"
+            curl -fsS -D "$RUNNER_TEMP/$pod-locality-second.headers" -o "$RUNNER_TEMP/$pod-locality-second.png" "$locality_url"
+            grep -qi '^X-Cache-Status: HIT' "$RUNNER_TEMP/$pod-locality-second.headers"
+            cmp "$RUNNER_TEMP/$pod-locality-first.png" "$RUNNER_TEMP/$pod-locality-second.png"
+            kill "$pod_port_forward_pid" 2>/dev/null || true
+            wait "$pod_port_forward_pid" 2>/dev/null || true
+            echo "Replica-local cache MISS/HIT verified on $pod"
+          done
+
+          # Delete one serving pod and prove the Service still handles new
+          # requests through the surviving replica while Kubernetes replaces it.
+          victim="$(kubectl get pods -l app.kubernetes.io/instance=resizer,app.kubernetes.io/name=nginx-image-resizer -o jsonpath='{.items[0].metadata.name}')"
+          test -n "$victim"
+          kubectl delete pod "$victim" --wait=false
+          # Exercise the real in-cluster Service DNS/load-balancing path from
+          # the origin pod. kubectl port-forward service/... can remain pinned
+          # to the deleted pod and is not a reliable Service failover probe.
+          for request_id in $(seq 1 10); do
+            kubectl exec deployment/origin -- python -c "import struct; from urllib.request import urlopen; data=urlopen('http://resizer-nginx-image-resizer:8080/77x77/sample.png?pod-recovery=$request_id', timeout=5).read(); assert data[:8] == bytes.fromhex('89504e470d0a1a0a'), 'response is not PNG'; width,height=struct.unpack('>II', data[16:24]); assert (width,height)==(77,57), f'unexpected dimensions: {width}x{height}'"
+          done
+          kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=180s
+          test "$(kubectl get deployment resizer-nginx-image-resizer -o jsonpath='{.status.readyReplicas}')" = "2"
+          echo "pod replacement smoke passed: 10 image requests succeeded while one replica was deleted"
+
+          # Exercise the no-ready-endpoint state explicitly. Scaling to zero is
+          # deterministic in kind and verifies that the Service has no stale
+          # endpoints, then that traffic recovers when replicas return. This is
+          # endpoint outage/recovery coverage, not a substitute for a rolling
+          # upgrade test with no ready endpoints.
+          kubectl scale deployment/resizer-nginx-image-resizer --replicas=0
+          kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=120s
+          endpoints_empty=0
+          for attempt in $(seq 1 30); do
+            endpoint_ips="$(kubectl get endpoints resizer-nginx-image-resizer -o jsonpath='{.subsets[*].addresses[*].ip}')"
+            if [ -z "$endpoint_ips" ]; then endpoints_empty=1; break; fi
+            sleep 1
+          done
+          test "$endpoints_empty" = "1"
+          echo "Service correctly has no ready endpoints at zero replicas."
+          kubectl scale deployment/resizer-nginx-image-resizer --replicas=2
+          kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=180s
+          test "$(kubectl get deployment resizer-nginx-image-resizer -o jsonpath='{.status.readyReplicas}')" = "2"
+          # Assert EndpointSlice/Service discovery is populated and exercise the
+          # actual in-cluster Service DNS path, not kubectl port-forward (which
+          # selects a pod and can bypass the Service data path).
+          endpoint_ips=""
+          for attempt in $(seq 1 30); do
+            endpoint_ips="$(kubectl get endpoints resizer-nginx-image-resizer -o jsonpath='{.subsets[*].addresses[*].ip}')"
+            if [ -n "$endpoint_ips" ]; then break; fi
+            sleep 1
+          done
+          test -n "$endpoint_ips"
+          # Endpoint readiness can precede convergence of the cluster data plane.
+          # Retry the real Service DNS request briefly rather than failing on a
+          # transient connection refusal immediately after scaling from zero.
+          recovery_request_ok=0
+          for attempt in $(seq 1 15); do
+            if kubectl exec deployment/origin -- python -c "import struct; from urllib.request import urlopen; data=urlopen('http://resizer-nginx-image-resizer:8080/77x77/sample.png?zero-endpoint-recovery=1', timeout=5).read(); assert data[:8] == bytes.fromhex('89504e470d0a1a0a'), 'response is not PNG'; width,height=struct.unpack('>II', data[16:24]); assert (width,height)==(77,57), f'unexpected dimensions: {width}x{height}'" 2>"$RUNNER_TEMP/zero-endpoint-request.err"; then
+              recovery_request_ok=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$recovery_request_ok" != "1" ]; then
+            cat "$RUNNER_TEMP/zero-endpoint-request.err" >&2
+            echo "Service request did not recover after zero-endpoint interval" >&2
+            exit 1
+          fi
+          echo "Service routing recovered after zero-endpoint interval"
+
+          # Simulate a broken rolling-upgrade revision with an image that cannot be pulled.
+          # The chart's maxUnavailable=0/maxSurge=1 policy must preserve the old ready pods
+          # and Service endpoints until the new revision can become healthy.
+          kubectl set image deployment/resizer-nginx-image-resizer nginx=steady-image-resizer:missing-rolling-upgrade-fixture
+          bad_revision_seen=0
+          for attempt in $(seq 1 30); do
+            bad_pods="$(kubectl get pods -l app.kubernetes.io/instance=resizer,app.kubernetes.io/name=nginx-image-resizer -o jsonpath='{.items[*].spec.containers[0].image}')"
+            endpoint_ips="$(kubectl get endpoints resizer-nginx-image-resizer -o jsonpath='{.subsets[*].addresses[*].ip}')"
+            if echo "$bad_pods" | grep -q 'missing-rolling-upgrade-fixture' && [ -n "$endpoint_ips" ]; then
+              set -- $endpoint_ips
+              if [ "$#" -ge 2 ]; then bad_revision_seen=1; break; fi
+            fi
+            sleep 2
+          done
+          test "$bad_revision_seen" = "1"
+          kubectl exec deployment/origin -- python -c "import struct; from urllib.request import urlopen; data=urlopen('http://resizer-nginx-image-resizer:8080/77x77/sample.png?failed-upgrade-preserves-capacity=1', timeout=10).read(); assert data[:8] == bytes.fromhex('89504e470d0a1a0a'), 'response is not PNG'; width,height=struct.unpack('>II', data[16:24]); assert (width,height)==(77,57), f'unexpected dimensions: {width}x{height}'"
+          echo "Failed rolling-upgrade revision did not remove ready Service capacity; image request still succeeded."
+          # Reconcile the failed manual image change back to the chart's known-good image.
+          helm upgrade resizer charts/nginx-image-resizer --set image.repository=steady-image-resizer --set image.tag=ci --set image.pullPolicy=IfNotPresent --set origin.host=origin --set uriStyle=prefix --set replicaCount=2 --wait --timeout=180s
+          kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=180s
+          test "$(kubectl get deployment resizer-nginx-image-resizer -o jsonpath='{.status.readyReplicas}')" = "2"
+          echo "Rolling-upgrade recovery passed: restored healthy revision with two ready replicas."
+
+          # Bad readiness must keep new pods out of endpoints while old replicas serve.
+          kubectl patch deployment/resizer-nginx-image-resizer --type=json -p='[{"op":"replace","path":"/spec/template/spec/containers/0/readinessProbe/httpGet/path","value":"/probe-failure"}]'
+          readiness_seen=0
+          for attempt in $(seq 1 30); do
+            ready="$(kubectl get pods -l app.kubernetes.io/instance=resizer,app.kubernetes.io/name=nginx-image-resizer -o jsonpath='{.items[*].status.containerStatuses[0].ready}')"
+            endpoints="$(kubectl get endpoints resizer-nginx-image-resizer -o jsonpath='{.subsets[*].addresses[*].ip}')"
+            if echo "$ready" | grep -qw false && [ -n "$endpoints" ]; then readiness_seen=1; break; fi
+            sleep 2
+          done
+          test "$readiness_seen" = "1"
+          kubectl patch deployment/resizer-nginx-image-resizer --type=json -p='[{"op":"replace","path":"/spec/template/spec/containers/0/readinessProbe/httpGet/path","value":"/healthz"}]'
+          kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=180s
+
+          # Bad liveness must trigger a restart without removing healthy old endpoints.
+          kubectl patch deployment/resizer-nginx-image-resizer --type=json -p='[{"op":"replace","path":"/spec/template/spec/containers/0/readinessProbe/httpGet/path","value":"/probe-failure"},{"op":"replace","path":"/spec/template/spec/containers/0/livenessProbe/httpGet/path","value":"/probe-failure"}]'
+          liveness_seen=0
+          for attempt in $(seq 1 35); do
+            restarts="$(kubectl get pods -l app.kubernetes.io/instance=resizer,app.kubernetes.io/name=nginx-image-resizer -o jsonpath='{.items[*].status.containerStatuses[0].restartCount}')"
+            endpoints="$(kubectl get endpoints resizer-nginx-image-resizer -o jsonpath='{.subsets[*].addresses[*].ip}')"
+            if echo "$restarts" | grep -Eq '(^| )([1-9][0-9]*)( |$)' && [ -n "$endpoints" ]; then liveness_seen=1; break; fi
+            sleep 2
+          done
+          test "$liveness_seen" = "1"
+          kubectl patch deployment/resizer-nginx-image-resizer --type=json -p='[{"op":"replace","path":"/spec/template/spec/containers/0/readinessProbe/httpGet/path","value":"/healthz"},{"op":"replace","path":"/spec/template/spec/containers/0/livenessProbe/httpGet/path","value":"/healthz"}]'
+          kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=180s
+
+          # Prove the previous Helm revision can be restored after an upgrade.
+          helm rollback resizer 1 --wait --timeout=180s
+          kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=120s
+          start_port_forward
+          test "$(kubectl get deployment resizer-nginx-image-resizer -o jsonpath='{.spec.replicas}')" = "1"
+          curl -fsS http://127.0.0.1:18080/healthz >/dev/null
+          curl -fsS -o /dev/null http://127.0.0.1:18080/77x77/sample.png
+ "$RUNNER_TEMP/rendered.yaml"; then echo "NetworkPolicy unexpectedly enabled by default" >&2; exit 1; fi
       - name: Build and load application and test-origin images
         run: |
           docker build -t steady-image-resizer:ci .
