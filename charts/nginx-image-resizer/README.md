@@ -19,7 +19,7 @@ Use an immutable release tag or, preferably, an image digest for production:
       --set origin.host=origin.default.svc.cluster.local \
       --set image.digest=sha256:<64-hex-character-digest>
 
-The chart creates a ClusterIP Service. Terminate public TLS at an Ingress controller or external load balancer; this chart intentionally does not install either. The image publishing workflow pushes the main tag and semantic-version tags to GHCR. Make the GHCR package public for unauthenticated pulls, or set imagePullSecrets for a private package.
+The chart creates a ClusterIP Service. Terminate public TLS at an Ingress controller or external load balancer; this chart intentionally does not install either. The Deployment uses a `preStop` hook to ask NGINX to gracefully quit and waits for the master PID file to disappear before kubelet sends its final termination signal, allowing active requests to drain within `terminationGracePeriodSeconds`. The image publishing workflow pushes the main tag and semantic-version tags to GHCR. Make the GHCR package public for unauthenticated pulls, or set imagePullSecrets for a private package.
 
 ### Optional egress NetworkPolicy
 
