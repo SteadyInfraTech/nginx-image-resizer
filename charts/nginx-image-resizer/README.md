@@ -21,6 +21,10 @@ Use an immutable release tag or, preferably, an image digest for production:
 
 The chart creates a ClusterIP Service. Terminate public TLS at an Ingress controller or external load balancer; this chart intentionally does not install either. The image publishing workflow pushes the main tag and semantic-version tags to GHCR. Make the GHCR package public for unauthenticated pulls, or set imagePullSecrets for a private package.
 
+### Optional egress NetworkPolicy
+
+The chart can optionally restrict resizer pod egress with `--set networkPolicy.enabled=true`. The policy allows TCP to the configured origin port on pods matching `networkPolicy.origin.podLabels` and `networkPolicy.origin.namespaceLabels`, plus UDP/TCP DNS to CoreDNS in `kube-system`. Set those selectors to match the real in-cluster origin. Use `networkPolicy.extraEgress` for explicitly required external destinations or additional services; review each rule carefully. The policy is disabled by default because NetworkPolicy resources are only enforced when the cluster CNI supports them. The dedicated `Network policy enforcement` CI workflow installs Calico in kind and proves that the configured origin remains reachable while an unrelated Service is blocked. This does not validate a customer cluster's other policies, ingress isolation, cloud firewalls, or external-origin CIDRs.
+
 The `1.0.0` tag above is an example: use it only after that image tag has been published. The Helm chart has its own independent SemVer version in `Chart.yaml`; `appVersion` records the application version represented by the chart and should be updated with an application release. A chart version bump is required for chart changes, even when the application image version does not change.
 
 To roll back to the previous Helm revision after an upgrade:

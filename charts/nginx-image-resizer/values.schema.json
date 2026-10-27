@@ -59,6 +59,36 @@
         "tmpSizeLimit": {"type": "string", "minLength": 1},
         "runSizeLimit": {"type": "string", "minLength": 1}
       }
+    },
+    "networkPolicy": {
+      "type": "object",
+      "required": ["enabled", "origin", "extraEgress"],
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "origin": {
+          "type": "object",
+          "required": ["namespaceLabels", "podLabels"],
+          "properties": {
+            "namespaceLabels": {"type": "object", "additionalProperties": {"type": "string"}},
+            "podLabels": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "string"}}
+          }
+        },
+        "extraEgress": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "to": {"type": "array", "minItems": 1, "items": {"type": "object"}},
+              "ports": {"type": "array", "minItems": 1, "items": {"type": "object"}}
+            },
+            "anyOf": [
+              {"required": ["to"], "properties": {"to": {"type": "array", "minItems": 1}}},
+              {"required": ["ports"], "properties": {"ports": {"type": "array", "minItems": 1}}}
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
     }
   }
 }

@@ -1,0 +1,47 @@
+{{- $networkPolicy := .Values.networkPolicy | default dict }}
+{{- $networkOrigin := $networkPolicy.origin | default dict }}
+{{- if ($networkPolicy.enabled | default false) }}
+{{- $originNamespaceLabels := $networkOrigin.namespaceLabels | default (dict "kubernetes.io/metadata.name" .Release.Namespace) }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "nginx-image-resizer.fullname" . }}-egress
+  labels:
+    {{- include "nginx-image-resizer.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "nginx-image-resizer.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Egress
+  egress:
+    # By default, scope the origin to the release namespace. Set namespaceLabels
+    # explicitly when the origin runs in a different namespace.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              {{- toYaml $originNamespaceLabels | nindent 14 }}
+          podSelector:
+            matchLabels:
+              {{- toYaml $networkOrigin.podLabels | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.origin.port }}
+    # DNS is required to resolve the configured origin hostname.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    {{- with $networkPolicy.extraEgress }}
+    # Optional additional egress rules for external origins or required services.
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+{{- end }}

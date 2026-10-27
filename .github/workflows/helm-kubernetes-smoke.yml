@@ -50,6 +50,16 @@ jobs:
           grep -q '/_resize/' "$RUNNER_TEMP/rendered-suffix.yaml"
           if helm template resizer charts/nginx-image-resizer --set uriStyle=invalid > /dev/null 2>&1; then echo "invalid uriStyle unexpectedly passed schema validation" >&2; exit 1; fi
           if grep -Fq 'location ~ ^/(?<edge_width>' "$RUNNER_TEMP/rendered-suffix.yaml"; then echo "prefix route unexpectedly rendered for suffix style" >&2; exit 1; fi
+          # NetworkPolicy is opt-in and must render the intended origin/DNS allowlist.
+          helm template resizer charts/nginx-image-resizer --set origin.host=origin --set image.tag=ci --set networkPolicy.enabled=true > "$RUNNER_TEMP/rendered-network-policy.yaml"
+          grep -q '^kind: NetworkPolicy$' "$RUNNER_TEMP/rendered-network-policy.yaml"
+          grep -q 'k8s-app: kube-dns' "$RUNNER_TEMP/rendered-network-policy.yaml"
+          grep -q 'port: 8081' "$RUNNER_TEMP/rendered-network-policy.yaml"
+          grep -q 'kubernetes.io/metadata.name: default' "$RUNNER_TEMP/rendered-network-policy.yaml"
+          if helm template resizer charts/nginx-image-resizer --set origin.host=origin --set image.tag=ci --set networkPolicy.enabled=true --set-json 'networkPolicy.extraEgress=[{}]' > /dev/null 2>&1; then echo "empty extraEgress rule unexpectedly passed schema validation" >&2; exit 1; fi
+          # Simulate a pre-feature release with no networkPolicy value.
+          helm template resizer charts/nginx-image-resizer --set origin.host=origin --set image.tag=ci --set networkPolicy=null --skip-schema-validation > "$RUNNER_TEMP/rendered-legacy-values.yaml"
+          if grep -q '^kind: NetworkPolicy$' "$RUNNER_TEMP/rendered-legacy-values.yaml"; then echo "legacy values unexpectedly enabled NetworkPolicy" >&2; exit 1; fi
       - name: Build and load application and test-origin images
         run: |
           docker build -t steady-image-resizer:ci .
