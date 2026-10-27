@@ -46,6 +46,16 @@ spec:
               protocol: TCP
           securityContext:
             {{- toYaml .Values.containerSecurityContext | nindent 12 }}
+          # Kubernetes normally sends SIGTERM, which makes NGINX stop quickly.
+          # Ask the master to drain workers and wait for the PID file to disappear
+          # before kubelet sends the final signal.
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - nginx -s quit; while [ -s /run/nginx/nginx.pid ]; do sleep 0.2; done
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           startupProbe:
