@@ -205,7 +205,22 @@ jobs:
             sleep 1
           done
           test -n "$endpoint_ips"
-          kubectl exec deployment/origin -- python -c "import struct; from urllib.request import urlopen; data=urlopen('http://resizer-nginx-image-resizer:8080/77x77/sample.png?zero-endpoint-recovery=1', timeout=10).read(); assert data[:8] == bytes.fromhex('89504e470d0a1a0a'), 'response is not PNG'; width,height=struct.unpack('>II', data[16:24]); assert (width,height)==(77,57), f'unexpected dimensions: {width}x{height}'"
+          # Endpoint readiness can precede convergence of the cluster data plane.
+          # Retry the real Service DNS request briefly rather than failing on a
+          # transient connection refusal immediately after scaling from zero.
+          recovery_request_ok=0
+          for attempt in $(seq 1 15); do
+            if kubectl exec deployment/origin -- python -c "import struct; from urllib.request import urlopen; data=urlopen('http://resizer-nginx-image-resizer:8080/77x77/sample.png?zero-endpoint-recovery=1', timeout=5).read(); assert data[:8] == bytes.fromhex('89504e470d0a1a0a'), 'response is not PNG'; width,height=struct.unpack('>II', data[16:24]); assert (width,height)==(77,57), f'unexpected dimensions: {width}x{height}'" 2>"$RUNNER_TEMP/zero-endpoint-request.err"; then
+              recovery_request_ok=1
+              break
+            fi
+            sleep 2
+          done
+          if [ "$recovery_request_ok" != "1" ]; then
+            cat "$RUNNER_TEMP/zero-endpoint-request.err" >&2
+            echo "Service request did not recover after zero-endpoint interval" >&2
+            exit 1
+          fi
           echo "Service routing recovered after zero-endpoint interval"
 
           # Simulate a broken rolling-upgrade revision with an image that cannot be pulled.
