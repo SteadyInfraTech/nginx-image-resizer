@@ -1,0 +1,204 @@
+name: cert-manager TLS renewal and propagation
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cert-manager-tls-renewal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.17.3
+      - name: Create kind cluster
+        uses: helm/kind-action@v1.12.0
+        with:
+          cluster_name: cert-manager-rotation
+      - name: Build and load application and origin images
+        run: |
+          set -euo pipefail
+          docker build -t steady-image-resizer:cert-rotation .
+          docker build -f demo/Dockerfile -t steady-image-resizer-demo-origin:cert-rotation .
+          kind load docker-image --name cert-manager-rotation steady-image-resizer:cert-rotation
+          kind load docker-image --name cert-manager-rotation steady-image-resizer-demo-origin:cert-rotation
+      - name: Install ingress-nginx
+        run: |
+          set -euo pipefail
+          helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+          helm repo update ingress-nginx
+          helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
+            --version 4.12.1 \
+            --namespace ingress-nginx --create-namespace \
+            --set controller.replicaCount=1 \
+            --set controller.service.type=ClusterIP \
+            --set controller.admissionWebhooks.enabled=false \
+            --wait --timeout=240s
+          kubectl rollout status deployment/ingress-nginx-controller -n ingress-nginx --timeout=180s
+      - name: Install cert-manager with CRDs
+        run: |
+          set -euo pipefail
+          helm repo add jetstack https://charts.jetstack.io
+          helm repo update jetstack
+          helm upgrade --install cert-manager jetstack/cert-manager \
+            --version v1.17.2 \
+            --namespace cert-manager --create-namespace \
+            --set crds.enabled=true \
+            --wait --timeout=240s
+          kubectl rollout status deployment/cert-manager -n cert-manager --timeout=180s
+          kubectl rollout status deployment/cert-manager-webhook -n cert-manager --timeout=180s
+          kubectl rollout status deployment/cert-manager-cainjector -n cert-manager --timeout=180s
+      - name: Deploy resizer and TLS Ingress backed by cert-manager
+        run: |
+          set -euo pipefail
+          kubectl create deployment origin --image=steady-image-resizer-demo-origin:cert-rotation
+          kubectl expose deployment origin --port=8081 --target-port=8081
+          kubectl rollout status deployment/origin --timeout=120s
+          helm upgrade --install resizer charts/nginx-image-resizer \
+            --set image.repository=steady-image-resizer \
+            --set image.tag=cert-rotation \
+            --set image.pullPolicy=IfNotPresent \
+            --set origin.host=origin \
+            --set replicaCount=2 \
+            --wait --timeout=180s
+          cat <<'EOF' | kubectl apply -f -
+          apiVersion: cert-manager.io/v1
+          kind: Issuer
+          metadata:
+            name: selfsigned-test
+          spec:
+            selfSigned: {}
+          ---
+          apiVersion: networking.k8s.io/v1
+          kind: Ingress
+          metadata:
+            name: resizer
+            annotations:
+              cert-manager.io/issuer: selfsigned-test
+          spec:
+            ingressClassName: nginx
+            tls:
+              - hosts:
+                  - images.test
+                secretName: resizer-ingress-tls
+            rules:
+              - host: images.test
+                http:
+                  paths:
+                    - path: /
+                      pathType: Prefix
+                      backend:
+                        service:
+                          name: resizer-nginx-image-resizer
+                          port:
+                            number: 8080
+          EOF
+          kubectl wait --for=condition=Ready certificate/resizer-ingress-tls --timeout=180s
+          kubectl get secret resizer-ingress-tls -o jsonpath='{.data.tls\.crt}' | base64 -d > "$RUNNER_TEMP/initial.crt"
+          openssl x509 -in "$RUNNER_TEMP/initial.crt" -noout -serial -subject
+      - name: Verify live TLS endpoint rotates after cert-manager reissues the Secret
+        shell: bash
+        run: |
+          set -euo pipefail
+          cleanup() {
+            if [ -n "${port_forward_pid:-}" ]; then
+              kill "$port_forward_pid" >/dev/null 2>&1 || true
+            fi
+          }
+          trap cleanup EXIT
+
+          kubectl port-forward -n ingress-nginx service/ingress-nginx-controller 18443:443 > "$RUNNER_TEMP/tls-port-forward.log" 2>&1 &
+          port_forward_pid=$!
+          presented_serial() {
+            timeout 5 openssl s_client -connect 127.0.0.1:18443 -servername images.test </dev/null 2>/dev/null |
+              openssl x509 -noout -serial 2>/dev/null | sed 's/^serial=//'
+          }
+          secret_serial() {
+            kubectl get secret resizer-ingress-tls -o jsonpath='{.data.tls\.crt}' 2>/dev/null |
+              base64 -d | openssl x509 -noout -serial 2>/dev/null | sed 's/^serial=//'
+          }
+
+          initial_secret_serial="$(openssl x509 -in "$RUNNER_TEMP/initial.crt" -noout -serial | sed 's/^serial=//')"
+          initial_endpoint_serial=""
+          for attempt in $(seq 1 60); do
+            initial_endpoint_serial="$(presented_serial || true)"
+            [ "$initial_endpoint_serial" = "$initial_secret_serial" ] && break
+            if ! kill -0 "$port_forward_pid" 2>/dev/null; then
+              cat "$RUNNER_TEMP/tls-port-forward.log" >&2 || true
+              exit 1
+            fi
+            sleep 1
+          done
+          test "$initial_endpoint_serial" = "$initial_secret_serial"
+
+          curl -kfsS --resolve images.test:18443:127.0.0.1 \
+            'https://images.test:18443/77x77/sample.png?cert-rotation=before' \
+            -o "$RUNNER_TEMP/before.png"
+          python3 - "$RUNNER_TEMP/before.png" <<'PY'
+          import struct, sys
+          data = open(sys.argv[1], "rb").read()
+          assert data[:8] == bytes.fromhex("89504e470d0a1a0a"), "pre-rotation response is not PNG"
+          assert struct.unpack(">II", data[16:24]) == (77, 57), "pre-rotation image dimensions mismatch"
+          PY
+
+          # Deleting the generated TLS Secret asks cert-manager to issue fresh
+          # material. This exercises the controller -> Secret -> ingress-nginx
+          # propagation path, rather than manually editing certificate files.
+          kubectl delete secret resizer-ingress-tls
+          replacement_secret_serial=""
+          for attempt in $(seq 1 120); do
+            replacement_secret_serial="$(secret_serial || true)"
+            if [ -n "$replacement_secret_serial" ] && [ "$replacement_secret_serial" != "$initial_secret_serial" ]; then
+              break
+            fi
+            sleep 1
+          done
+          if [ -z "$replacement_secret_serial" ] || [ "$replacement_secret_serial" = "$initial_secret_serial" ]; then
+            kubectl describe certificate resizer-ingress-tls >&2 || true
+            kubectl logs deployment/cert-manager -n cert-manager --tail=150 >&2 || true
+            echo "cert-manager did not replace the TLS Secret with a new certificate" >&2
+            exit 1
+          fi
+
+          replacement_endpoint_serial=""
+          for attempt in $(seq 1 90); do
+            replacement_endpoint_serial="$(presented_serial || true)"
+            [ "$replacement_endpoint_serial" = "$replacement_secret_serial" ] && break
+            sleep 1
+          done
+          if [ "$replacement_endpoint_serial" != "$replacement_secret_serial" ]; then
+            kubectl get secret resizer-ingress-tls -o yaml >&2 || true
+            kubectl logs deployment/ingress-nginx-controller -n ingress-nginx --tail=150 >&2 || true
+            echo "Ingress TLS endpoint did not begin presenting cert-manager's replacement certificate" >&2
+            echo "Expected serial: $replacement_secret_serial; observed: $replacement_endpoint_serial" >&2
+            exit 1
+          fi
+
+          curl -kfsS --resolve images.test:18443:127.0.0.1 \
+            'https://images.test:18443/77x77/sample.png?cert-rotation=after' \
+            -o "$RUNNER_TEMP/after.png"
+          python3 - "$RUNNER_TEMP/after.png" <<'PY'
+          import struct, sys
+          data = open(sys.argv[1], "rb").read()
+          assert data[:8] == bytes.fromhex("89504e470d0a1a0a"), "post-rotation response is not PNG"
+          assert struct.unpack(">II", data[16:24]) == (77, 57), "post-rotation image dimensions mismatch"
+          PY
+          echo "cert-manager TLS propagation passed: endpoint serial changed from $initial_secret_serial to $replacement_endpoint_serial and HTTPS image requests remained valid."
+      - name: Diagnose cert-manager and ingress failures
+        if: failure()
+        run: |
+          kubectl get pods -A -o wide || true
+          kubectl get certificates,certificaterequests,issuers,secrets,ingress -A -o yaml || true
+          kubectl get events -A --sort-by=.lastTimestamp || true
+          kubectl logs deployment/cert-manager -n cert-manager --tail=200 || true
+          kubectl logs deployment/ingress-nginx-controller -n ingress-nginx --tail=200 || true
+          kubectl logs deployment/resizer-nginx-image-resizer --all-containers=true --tail=100 || true
