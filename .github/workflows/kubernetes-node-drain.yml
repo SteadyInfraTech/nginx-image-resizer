@@ -20,6 +20,22 @@ jobs:
         uses: azure/setup-helm@v4
         with:
           version: v3.17.3
+      - name: Lint chart and verify disruption budget defaults and schema
+        run: |
+          set -eu
+          helm lint charts/nginx-image-resizer
+          helm template resizer charts/nginx-image-resizer > "$RUNNER_TEMP/default.yaml"
+          if grep -q '^kind: PodDisruptionBudget$' "$RUNNER_TEMP/default.yaml"; then
+            echo "PDB must remain disabled by default" >&2
+            exit 1
+          fi
+          helm template resizer charts/nginx-image-resizer --set podDisruptionBudget.enabled=true --set podDisruptionBudget.minAvailable=1 > "$RUNNER_TEMP/pdb.yaml"
+          grep -q '^kind: PodDisruptionBudget$' "$RUNNER_TEMP/pdb.yaml"
+          grep -q 'minAvailable: 1' "$RUNNER_TEMP/pdb.yaml"
+          if helm template resizer charts/nginx-image-resizer --set podDisruptionBudget.minAvailable=-1 > /dev/null 2>&1; then
+            echo "negative PDB minAvailable unexpectedly passed schema validation" >&2
+            exit 1
+          fi
       - name: Create multi-node kind cluster
         uses: helm/kind-action@v1.12.0
         with:
