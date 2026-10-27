@@ -27,7 +27,7 @@ Last reconciled: 2026-10-27. This matrix distinguishes automated checks from dep
 | ConfigMap change triggers a rollout | Helm/kind smoke compares the pod-template config checksum before/after a URI-style change, waits for rollout and verifies the new route | Helm Kubernetes smoke | Confirms the changed NGINX config changes the pod template and completes a rollout. |
 | Cache locality across replicas | Helm/kind smoke contacts each pod directly | Helm Kubernetes smoke | A unique URL must be a MISS then HIT on each of two pods, showing each pod owns an independent cache. Does not assert a particular hit ratio through Service load balancing. |
 | Packaged chart install/upgrade | Packaged chart smoke | Helm packaged chart smoke | Exercises the packaged artifact path, not every external release-registry or cluster combination. |
-| Immutable release image and published image smoke | Release validator and published-image workflow | CI, Published image Helm smoke | Validates tag selection/version metadata and smoke-tests the published semantic-version image in kind; not a customer-environment installation rehearsal. |
+| Published-image tag selection and smoke | Release validator and published-image workflow | CI, Published image Helm smoke | Pull-request/manual runs exercise the mutable `main` image; after a successful versioned publish, the workflow selects and tests the corresponding immutable semantic-version image. Neither path replaces a customer-environment installation rehearsal. |
 
 ## Deployment-specific validation
 
