@@ -32,6 +32,8 @@ jobs:
           set -eu
           if [[ "$PUBLISHED_REF" == v* ]]; then
             image_tag="${PUBLISHED_REF#v}"
+            # docker/metadata-action's {{version}} tag excludes SemVer build metadata.
+            image_tag="${image_tag%%+*}"
           else
             image_tag=main
           fi
