@@ -56,8 +56,36 @@ jobs:
           kubectl expose deployment origin --port=8081 --target-port=8081
           kubectl create deployment blocked --image=steady-image-resizer-demo-origin:ci
           kubectl expose deployment blocked --port=8081 --target-port=8081
+          # Same-label origin in another namespace must remain outside the allow-list.
+          kubectl create namespace unrelated
+          # The policy selects destination Pods, so put the matching label on the Pod
+          # template itself. Keep the Deployment selector consistent with that label.
+          cat <<'YAML' | kubectl apply -f -
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: origin-lookalike
+            namespace: unrelated
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: origin
+            template:
+              metadata:
+                labels:
+                  app: origin
+              spec:
+                containers:
+                  - name: origin
+                    image: steady-image-resizer-demo-origin:ci
+                    ports:
+                      - containerPort: 8081
+          YAML
+          kubectl -n unrelated expose deployment origin-lookalike --port=8081 --target-port=8081 --name=origin-lookalike
           kubectl rollout status deployment/origin --timeout=120s
           kubectl rollout status deployment/blocked --timeout=120s
+          kubectl -n unrelated rollout status deployment/origin-lookalike --timeout=120s
           helm upgrade --install resizer charts/nginx-image-resizer \
             --set image.repository=steady-image-resizer \
             --set image.tag=ci \
@@ -98,7 +126,12 @@ jobs:
             echo "NetworkPolicy regression: resizer reached a disallowed destination" >&2
             exit 1
           fi
-          echo "NetworkPolicy enforcement passed: configured origin reachable; unrelated Service blocked."
+          # A matching pod label must not bypass the namespace selector.
+          if kubectl exec "$pod" -- wget -T 4 -qO- http://origin-lookalike.unrelated.svc.cluster.local:8081/sample.png > /dev/null 2>&1; then
+            echo "NetworkPolicy regression: resizer reached a matching-label origin in an unrelated namespace" >&2
+            exit 1
+          fi
+          echo "NetworkPolicy enforcement passed: configured origin reachable; unrelated Service and cross-namespace look-alike blocked."
       - name: Collect diagnostics on failure
         if: failure()
         run: |
