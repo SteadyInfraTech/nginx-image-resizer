@@ -2,7 +2,7 @@ apiVersion: v2
 name: nginx-image-resizer
 description: On-demand image resizing and proxy caching with upstream NGINX image-filter
 type: application
-version: 0.1.0
+version: 0.2.0
 appVersion: "0.1.0"
 keywords:
   - nginx
