@@ -1,0 +1,96 @@
+name: Kubernetes node drain
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  kubernetes-node-drain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.17.3
+      - name: Create multi-node kind cluster
+        uses: helm/kind-action@v1.12.0
+        with:
+          cluster_name: node-drain
+          config: .github/kind-node-drain.yaml
+      - name: Build and load application and origin images
+        run: |
+          docker build -t steady-image-resizer:node-drain .
+          docker build -f demo/Dockerfile -t steady-image-resizer-demo-origin:node-drain .
+          kind load docker-image --name node-drain steady-image-resizer:node-drain
+          kind load docker-image --name node-drain steady-image-resizer-demo-origin:node-drain
+      - name: Install origin and resizer with disruption protection
+        run: |
+          set -eu
+          kubectl label node kind-worker drain-test=true
+          kubectl label node kind-worker2 drain-test=true
+          kubectl create deployment origin --image=steady-image-resizer-demo-origin:node-drain
+          kubectl patch deployment origin --type=merge -p='{"spec":{"template":{"spec":{"nodeSelector":{"kubernetes.io/hostname":"kind-control-plane"}}}}}'
+          kubectl expose deployment origin --port=8081 --target-port=8081
+          kubectl rollout status deployment/origin --timeout=120s
+          helm upgrade --install resizer charts/nginx-image-resizer \
+            --set image.repository=steady-image-resizer \
+            --set image.tag=node-drain \
+            --set image.pullPolicy=IfNotPresent \
+            --set origin.host=origin \
+            --set replicaCount=2 \
+            --set podDisruptionBudget.enabled=true \
+            --set podDisruptionBudget.minAvailable=1 \
+            --set nodeSelector.drain-test=true \
+            --wait --timeout=180s
+          # Require one resizer replica per worker so draining either worker is a real disruption.
+          kubectl patch deployment resizer-nginx-image-resizer --type=merge -p='{"spec":{"template":{"spec":{"topologySpreadConstraints":[{"maxSkew":1,"topologyKey":"kubernetes.io/hostname","whenUnsatisfiable":"DoNotSchedule","labelSelector":{"matchLabels":{"app.kubernetes.io/instance":"resizer","app.kubernetes.io/name":"nginx-image-resizer"}}}]}}}'
+          kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=180s
+          test "$(kubectl get pdb resizer-nginx-image-resizer -o jsonpath='{.status.expectedPods}')" = "2"
+          test "$(kubectl get pdb resizer-nginx-image-resizer -o jsonpath='{.status.disruptionsAllowed}')" = "1"
+          test "$(kubectl get pods -l app.kubernetes.io/instance=resizer -o jsonpath='{.items[*].spec.nodeName}' | tr ' ' '\n' | sort -u | wc -l | tr -d ' ')" = "2"
+      - name: Drain a worker while continuously checking image delivery
+        shell: bash
+        run: |
+          set -euo pipefail
+          node="kind-worker"
+          kubectl get pods -l app.kubernetes.io/instance=resizer -o wide
+          kubectl drain "$node" --ignore-daemonsets --delete-emptydir-data --timeout=180s > "$RUNNER_TEMP/drain.log" 2>&1 &
+          drain_pid=$!
+          successes=0
+          failures=0
+          for request_id in $(seq 1 30); do
+            if kubectl exec deployment/origin -- python -c "import struct; from urllib.request import urlopen; data=urlopen('http://resizer-nginx-image-resizer:8080/77x77/node-drain=$request_id.png', timeout=8).read(); assert data[:8] == bytes.fromhex('89504e470d0a1a0a'), 'response is not PNG'; width,height=struct.unpack('>II', data[16:24]); assert (width,height)==(77,57), f'unexpected dimensions: {width}x{height}'"; then
+              successes=$((successes + 1))
+            else
+              failures=$((failures + 1))
+              echo "Image request $request_id failed during node drain" >&2
+              cat "$RUNNER_TEMP/drain.log" >&2 || true
+              exit 1
+            fi
+            sleep 0.5
+          done
+          wait "$drain_pid"
+          test "$successes" -eq 30
+          test "$failures" -eq 0
+          kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=180s
+          test "$(kubectl get deployment resizer-nginx-image-resizer -o jsonpath='{.status.readyReplicas}')" = "2"
+          test "$(kubectl get pdb resizer-nginx-image-resizer -o jsonpath='{.status.disruptionsAllowed}')" = "1"
+          kubectl exec deployment/origin -- python -c "import struct; from urllib.request import urlopen; data=urlopen('http://resizer-nginx-image-resizer:8080/77x77/after-node-drain.png', timeout=8).read(); assert data[:8] == bytes.fromhex('89504e470d0a1a0a'); width,height=struct.unpack('>II', data[16:24]); assert (width,height)==(77,57)"
+          echo "Node drain passed: 30/30 image requests succeeded and two replicas recovered."
+      - name: Diagnose node-drain failures
+        if: failure()
+        run: |
+          kubectl get nodes -o wide || true
+          kubectl get pods -o wide || true
+          kubectl get pdb -o yaml || true
+          kubectl get events --sort-by=.lastTimestamp || true
+          kubectl logs deployment/resizer-nginx-image-resizer --all-containers=true --tail=200 || true
+          kubectl logs deployment/origin --all-containers=true --tail=100 || true
