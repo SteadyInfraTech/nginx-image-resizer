@@ -67,6 +67,17 @@ resources:
     memory: 512Mi
     ephemeral-storage: 256Mi
 
+networkPolicy:
+  # Disabled by default: Kubernetes NetworkPolicy resources have no effect unless
+  # the cluster's CNI implements policy enforcement.
+  enabled: false
+  origin:
+    namespaceLabels: {}
+    podLabels:
+      app: origin
+  # Add rules for external origins or other explicitly required destinations.
+  extraEgress: []
+
 nodeSelector: {}
 tolerations: []
 affinity: {}
