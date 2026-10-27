@@ -93,14 +93,14 @@ jobs:
               - name: hold
                 image: steady-image-resizer:node-drain
                 imagePullPolicy: IfNotPresent
-                command: ["sh", "-c", "sleep 1"]
+                command: ["sh", "-c", "sleep 3600"]
                 lifecycle:
                   preStop:
                     exec:
                       command: ["sh", "-c", "sleep 10"]
           EOF
           kubectl wait --for=condition=Ready pod/drain-window --timeout=60s
-          kubectl drain "$node" --ignore-daemonsets --delete-emptydir-data --timeout=180s > "$RUNNER_TEMP/drain.log" 2>&1 &
+          kubectl drain "$node" --ignore-daemonsets --delete-emptydir-data --force --timeout=180s > "$RUNNER_TEMP/drain.log" 2>&1 &
           drain_pid=$!
           # Do not start the request assertions until kubectl has cordoned the node.
           for attempt in $(seq 1 60); do
