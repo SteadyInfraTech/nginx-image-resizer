@@ -46,7 +46,7 @@ jobs:
           test -s "$packaged"
           cp "$packaged" "$archive"
           helm show chart "$archive"
-          sha256sum "$archive" | tee "$archive.sha256"
+          (cd "$RUNNER_TEMP/chart" && sha256sum "$(basename "$archive")" > "$(basename "$archive").sha256")
           echo "Packaged chart version=$chart_version appVersion=$version asset=$(basename "$archive")"
       - name: Attach chart archive and checksum to the GitHub release
         env:
