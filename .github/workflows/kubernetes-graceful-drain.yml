@@ -83,7 +83,7 @@ jobs:
           print(f"Kubernetes graceful drain passed: in-flight request completed ({width}x{height})")
           PY
           kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=120s
-          kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=resizer --timeout=120s
+          kubectl wait --for=condition=Available deployment/resizer-nginx-image-resizer --timeout=60s
           healthy=0
           for attempt in $(seq 1 30); do
             if kubectl exec drain-client -- curl -fsS http://resizer-nginx-image-resizer:8080/healthz >/dev/null 2>&1; then healthy=1; break; fi
