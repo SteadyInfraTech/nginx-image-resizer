@@ -31,6 +31,7 @@ jobs:
           install -m 644 "$RUNNER_TEMP/tls-rotation/first.crt" "$RUNNER_TEMP/tls-rotation/tls.crt"
           chmod 600 "$RUNNER_TEMP/tls-rotation/second.key"
           chmod 644 "$RUNNER_TEMP/tls-rotation/second.crt"
+          sudo chown root:root "$RUNNER_TEMP"/tls-rotation/*
       - name: Build direct-TLS image
         run: docker build --build-arg NGINX_CONFIG=nginx-direct-tls.conf --build-arg NGINX_PUBLIC_HOST=localhost -t steady-nginx-image-resizer:tls-rotation .
       - name: Rotate the mounted certificate and verify the live TLS endpoint
@@ -70,6 +71,7 @@ jobs:
           install -m 600 "$RUNNER_TEMP/tls-rotation/second.key" "$RUNNER_TEMP/tls-rotation/tls.key.next"
           mv "$RUNNER_TEMP/tls-rotation/tls.crt.next" "$RUNNER_TEMP/tls-rotation/tls.crt"
           mv "$RUNNER_TEMP/tls-rotation/tls.key.next" "$RUNNER_TEMP/tls-rotation/tls.key"
+          sudo chown root:root "$RUNNER_TEMP/tls-rotation/tls.crt" "$RUNNER_TEMP/tls-rotation/tls.key"
           docker exec tls-rotation nginx -t -c /run/nginx/nginx.conf
           docker exec tls-rotation nginx -s reload -c /run/nginx/nginx.conf
           second_seen=""
