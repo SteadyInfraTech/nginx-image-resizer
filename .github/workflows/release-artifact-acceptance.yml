@@ -49,7 +49,7 @@ jobs:
             echo "from_version and to_version must differ" >&2
             exit 1
           }
-          newest="$(printf '%s\\n' "$FROM_VERSION" "$TO_VERSION" | sort -V | tail -n1)"
+          newest="$(printf '%s\n' "$FROM_VERSION" "$TO_VERSION" | sort -V | tail -n1)"
           [[ "$newest" == "$TO_VERSION" ]] || {
             echo "to_version must be newer than from_version" >&2
             exit 1
