@@ -91,10 +91,25 @@ jobs:
           kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=180s
           kubectl wait --for=jsonpath='{.status.readyReplicas}'=2 deployment/resizer-nginx-image-resizer --timeout=120s
           kubectl wait --for=jsonpath='{.status.disruptionsAllowed}'=1 pdb/resizer-nginx-image-resizer --timeout=60s
-          # The relaxed rollout must preserve the two-worker baseline; otherwise this
-          # test could drain a node without evicting a resizer replica.
-          spread_nodes="$(kubectl get pods -l app.kubernetes.io/instance=resizer -o jsonpath='{.items[?(@.status.phase==\"Running\")].spec.nodeName}' | tr ' ' '\\n' | sort -u | wc -l | tr -d ' ')"
-          test "$spread_nodes" = "2"
+          # Count only ready, non-terminating resizer pods. Require one on the
+          # worker about to be drained and one on the surviving worker, so this
+          # test cannot pass without evicting a live resizer replica.
+          kubectl get pods -l app.kubernetes.io/instance=resizer -o json |
+            python3 -c 'import json,sys
+pods=json.load(sys.stdin)["items"]
+ready=[]
+for pod in pods:
+    meta=pod["metadata"]
+    status=pod.get("status", {})
+    if meta.get("deletionTimestamp") is not None or status.get("phase") != "Running":
+        continue
+    conditions=status.get("conditions", [])
+    if any(c.get("type") == "Ready" and c.get("status") == "True" for c in conditions):
+        ready.append(pod.get("spec", {}).get("nodeName"))
+nodes=set(ready)
+assert "node-drain-worker" in nodes, f"no ready non-terminating resizer pod on drain target: {ready}"
+assert "node-drain-worker2" in nodes, f"no ready non-terminating resizer pod on surviving worker: {ready}"
+assert len(nodes) == 2, f"expected ready resizer pods on exactly two workers, got {ready}"'
       - name: Drain a worker while continuously checking image delivery
         shell: bash
         run: |
