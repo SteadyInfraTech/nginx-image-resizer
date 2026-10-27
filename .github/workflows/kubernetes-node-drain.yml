@@ -79,29 +79,61 @@ jobs:
           set -euo pipefail
           node="node-drain-worker"
           kubectl get pods -l app.kubernetes.io/instance=resizer -o wide
+          # Hold the drain open long enough to prove probes run inside the eviction window.
+          cat <<'EOF' | kubectl apply -f -
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: drain-window
+          spec:
+            nodeSelector:
+              kubernetes.io/hostname: node-drain-worker
+            restartPolicy: Never
+            containers:
+              - name: hold
+                image: steady-image-resizer:node-drain
+                imagePullPolicy: IfNotPresent
+                command: ["sh", "-c", "sleep 1"]
+                lifecycle:
+                  preStop:
+                    exec:
+                      command: ["sh", "-c", "sleep 10"]
+          EOF
+          kubectl wait --for=condition=Ready pod/drain-window --timeout=60s
           kubectl drain "$node" --ignore-daemonsets --delete-emptydir-data --timeout=180s > "$RUNNER_TEMP/drain.log" 2>&1 &
           drain_pid=$!
+          # Do not start the request assertions until kubectl has cordoned the node.
+          for attempt in $(seq 1 60); do
+            if [ "$(kubectl get node "$node" -o jsonpath='{.spec.unschedulable}')" = "true" ]; then
+              break
+            fi
+            if ! kill -0 "$drain_pid" 2>/dev/null; then
+              cat "$RUNNER_TEMP/drain.log" >&2 || true
+              echo "Drain finished before the node was cordoned" >&2
+              exit 1
+            fi
+            sleep 0.25
+          done
+          test "$(kubectl get node "$node" -o jsonpath='{.spec.unschedulable}')" = "true"
           successes=0
-          failures=0
-          for request_id in $(seq 1 30); do
+          while kill -0 "$drain_pid" 2>/dev/null; do
+            request_id=$((successes + 1))
             if kubectl exec deployment/origin -- python -c "import struct; from urllib.request import urlopen; data=urlopen('http://resizer-nginx-image-resizer:8080/77x77/sample.png?node-drain=$request_id', timeout=8).read(); assert data[:8] == bytes.fromhex('89504e470d0a1a0a'), 'response is not PNG'; width,height=struct.unpack('>II', data[16:24]); assert (width,height)==(77,57), f'unexpected dimensions: {width}x{height}'"; then
               successes=$((successes + 1))
             else
-              failures=$((failures + 1))
-              echo "Image request $request_id failed during node drain" >&2
+              echo "Image request $request_id failed while node drain was active" >&2
               cat "$RUNNER_TEMP/drain.log" >&2 || true
               exit 1
             fi
-            sleep 0.5
+            sleep 0.25
           done
           wait "$drain_pid"
-          test "$successes" -eq 30
-          test "$failures" -eq 0
+          test "$successes" -ge 5
           kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=180s
           test "$(kubectl get deployment resizer-nginx-image-resizer -o jsonpath='{.status.readyReplicas}')" = "2"
           test "$(kubectl get pdb resizer-nginx-image-resizer -o jsonpath='{.status.disruptionsAllowed}')" = "1"
           kubectl exec deployment/origin -- python -c "import struct; from urllib.request import urlopen; data=urlopen('http://resizer-nginx-image-resizer:8080/77x77/sample.png?after-node-drain=1', timeout=8).read(); assert data[:8] == bytes.fromhex('89504e470d0a1a0a'); width,height=struct.unpack('>II', data[16:24]); assert (width,height)==(77,57)"
-          echo "Node drain passed: 30/30 image requests succeeded and two replicas recovered."
+          echo "Node drain passed: $successes image requests succeeded during the active drain and two replicas recovered."
       - name: Diagnose node-drain failures
         if: failure()
         run: |
