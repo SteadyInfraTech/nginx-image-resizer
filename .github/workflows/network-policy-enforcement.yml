@@ -57,7 +57,7 @@ jobs:
             --set origin.host=origin \
             --set networkPolicy.enabled=true \
             --set networkPolicy.origin.podLabels.app=origin \
-            --set networkPolicy.origin.namespaceLabels.kubernetes\\.io/metadata\\.name=default \
+            --set-json 'networkPolicy.origin.namespaceLabels={"kubernetes.io/metadata.name":"default"}' \\
             --wait --timeout=180s
           kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=120s
       - name: Verify allowed origin and DNS work, while unrelated destination is blocked
