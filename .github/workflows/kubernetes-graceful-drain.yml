@@ -56,7 +56,8 @@ jobs:
           cleanup() {
             kill "$request_pid" 2>/dev/null || true
             kubectl logs deployment/origin --tail=50 || true
-            kubectl logs deployment/resizer-nginx-image-resizer --all-containers=true --tail=100 || true
+            current_pod="$(kubectl get pods -l app.kubernetes.io/instance=resizer -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+            if [ -n "$current_pod" ]; then kubectl logs "$current_pod" --all-containers=true --tail=100 || true; fi
           }
           trap cleanup EXIT
           started=0
@@ -81,4 +82,10 @@ jobs:
           PY
           kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=120s
           kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=resizer --timeout=120s
-          kubectl exec drain-client -- curl -fsS http://resizer-nginx-image-resizer:8080/healthz
+          healthy=0
+          for attempt in $(seq 1 30); do
+            if kubectl exec drain-client -- curl -fsS http://resizer-nginx-image-resizer:8080/healthz >/dev/null 2>&1; then healthy=1; break; fi
+            sleep 1
+          done
+          test "$healthy" = "1"
+          echo "replacement pod is ready and the Service health check succeeds"
