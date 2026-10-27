@@ -24,8 +24,26 @@ jobs:
         uses: azure/setup-helm@v4
         with:
           version: v3.17.3
+      - name: Select published image tag
+        if: github.event_name == 'workflow_run'
+        env:
+          PUBLISHED_REF: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          set -eu
+          if [[ "$PUBLISHED_REF" == v* ]]; then
+            image_tag="${PUBLISHED_REF#v}"
+            # docker/metadata-action's {{version}} tag excludes SemVer build metadata.
+            image_tag="${image_tag%%+*}"
+          else
+            image_tag=main
+          fi
+          echo "IMAGE_TAG=$image_tag" >> "$GITHUB_ENV"
+          echo "Smoke-testing published image tag: $image_tag"
+      - name: Select development image tag
+        if: github.event_name != 'workflow_run'
+        run: echo "IMAGE_TAG=main" >> "$GITHUB_ENV"
       - name: Verify anonymous GHCR pull
-        run: docker pull ghcr.io/steadyinfratech/nginx-image-resizer:main
+        run: docker pull "ghcr.io/steadyinfratech/nginx-image-resizer:$IMAGE_TAG"
       - name: Create kind cluster
         uses: helm/kind-action@v1.12.0
         with:
@@ -42,7 +60,7 @@ jobs:
           kubectl rollout status deployment/origin --timeout=120s
           helm upgrade --install resizer charts/nginx-image-resizer \
             --set image.repository=ghcr.io/steadyinfratech/nginx-image-resizer \
-            --set image.tag=main \
+            --set image.tag=$IMAGE_TAG \
             --set image.pullPolicy=Always \
             --set origin.host=origin \
             --set uriStyle=prefix \
@@ -94,7 +112,7 @@ jobs:
           # Switch the chart-rendered route and restart port-forward after the rollout.
           helm upgrade resizer charts/nginx-image-resizer \
             --set image.repository=ghcr.io/steadyinfratech/nginx-image-resizer \
-            --set image.tag=main \
+            --set image.tag=$IMAGE_TAG \
             --set image.pullPolicy=Always \
             --set origin.host=origin \
             --set uriStyle=suffix \
