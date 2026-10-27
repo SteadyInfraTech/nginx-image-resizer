@@ -57,7 +57,9 @@ jobs:
           grep -q 'port: 8081' "$RUNNER_TEMP/rendered-network-policy.yaml"
           grep -q 'kubernetes.io/metadata.name: default' "$RUNNER_TEMP/rendered-network-policy.yaml"
           if helm template resizer charts/nginx-image-resizer --set origin.host=origin --set image.tag=ci --set networkPolicy.enabled=true --set-json 'networkPolicy.extraEgress=[{}]' > /dev/null 2>&1; then echo "empty extraEgress rule unexpectedly passed schema validation" >&2; exit 1; fi
-          if grep -q '^kind: NetworkPolicy      - name: Build and load application and test-origin images
+          # NetworkPolicy must remain disabled unless explicitly enabled.
+          if grep -q '^kind: NetworkPolicy$' "$RUNNER_TEMP/rendered.yaml"; then echo "NetworkPolicy unexpectedly enabled by default" >&2; exit 1; fi
+      - name: Build and load application and test-origin images
         run: |
           docker build -t steady-image-resizer:ci .
           docker build -f demo/Dockerfile -t steady-image-resizer-demo-origin:ci .
@@ -289,7 +291,9 @@ jobs:
  "$RUNNER_TEMP/rendered.yaml"; then echo "NetworkPolicy unexpectedly enabled by default" >&2; exit 1; fi
           # Older releases installed before networkPolicy existed must still render safely with reused values.
           helm template resizer charts/nginx-image-resizer --set origin.host=origin --set image.tag=ci --set networkPolicy=null > "$RUNNER_TEMP/rendered-legacy-values.yaml"
-          if grep -q '^kind: NetworkPolicy      - name: Build and load application and test-origin images
+          # NetworkPolicy must remain disabled unless explicitly enabled.
+          if grep -q '^kind: NetworkPolicy$' "$RUNNER_TEMP/rendered.yaml"; then echo "NetworkPolicy unexpectedly enabled by default" >&2; exit 1; fi
+      - name: Build and load application and test-origin images
         run: |
           docker build -t steady-image-resizer:ci .
           docker build -f demo/Dockerfile -t steady-image-resizer-demo-origin:ci .
