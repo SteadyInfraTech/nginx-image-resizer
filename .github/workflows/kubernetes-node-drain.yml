@@ -50,10 +50,10 @@ jobs:
       - name: Install origin and resizer with disruption protection
         run: |
           set -eu
-          kubectl label node kind-worker drain-test=true
-          kubectl label node kind-worker2 drain-test=true
+          kubectl label node node-drain-worker drain-test=true
+          kubectl label node node-drain-worker2 drain-test=true
           kubectl create deployment origin --image=steady-image-resizer-demo-origin:node-drain
-          kubectl patch deployment origin --type=merge -p='{"spec":{"template":{"spec":{"nodeSelector":{"kubernetes.io/hostname":"kind-control-plane"}}}}}'
+          kubectl patch deployment origin --type=merge -p='{"spec":{"template":{"spec":{"nodeSelector":{"kubernetes.io/hostname":"node-drain-control-plane"}}}}}'
           kubectl expose deployment origin --port=8081 --target-port=8081
           kubectl rollout status deployment/origin --timeout=120s
           helm upgrade --install resizer charts/nginx-image-resizer \
@@ -76,7 +76,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node="kind-worker"
+          node="node-drain-worker"
           kubectl get pods -l app.kubernetes.io/instance=resizer -o wide
           kubectl drain "$node" --ignore-daemonsets --delete-emptydir-data --timeout=180s > "$RUNNER_TEMP/drain.log" 2>&1 &
           drain_pid=$!
