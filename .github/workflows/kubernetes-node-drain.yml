@@ -70,9 +70,20 @@ jobs:
           # Prefer spreading replicas across workers, without blocking rescheduling onto the surviving worker.
           kubectl patch deployment resizer-nginx-image-resizer --type=merge -p='{"spec":{"template":{"spec":{"topologySpreadConstraints":[{"maxSkew":1,"topologyKey":"kubernetes.io/hostname","whenUnsatisfiable":"ScheduleAnyway","labelSelector":{"matchLabels":{"app.kubernetes.io/instance":"resizer","app.kubernetes.io/name":"nginx-image-resizer"}}}]}}}}'
           kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=180s
-          test "$(kubectl get pdb resizer-nginx-image-resizer -o jsonpath='{.status.expectedPods}')" = "2"
-          test "$(kubectl get pdb resizer-nginx-image-resizer -o jsonpath='{.status.disruptionsAllowed}')" = "1"
-          test "$(kubectl get pods -l app.kubernetes.io/instance=resizer -o jsonpath='{.items[*].spec.nodeName}' | tr ' ' '\n' | sort -u | wc -l | tr -d ' ')" = "2"
+          # Rollout status can finish while old ReplicaSet pods are still terminating.
+          # Wait for the PDB and placement to converge before asserting the drain baseline.
+          baseline_ready=0
+          for attempt in $(seq 1 60); do
+            expected_pods="$(kubectl get pdb resizer-nginx-image-resizer -o jsonpath='{.status.expectedPods}')"
+            disruptions_allowed="$(kubectl get pdb resizer-nginx-image-resizer -o jsonpath='{.status.disruptionsAllowed}')"
+            node_count="$(kubectl get pods -l app.kubernetes.io/instance=resizer -o jsonpath='{.items[*].spec.nodeName}' | tr ' ' '\n' | sort -u | wc -l | tr -d ' ')"
+            if [ "$expected_pods" = "2" ] && [ "$disruptions_allowed" = "1" ] && [ "$node_count" = "2" ]; then
+              baseline_ready=1
+              break
+            fi
+            sleep 1
+          done
+          test "$baseline_ready" = "1"
       - name: Drain a worker while continuously checking image delivery
         shell: bash
         run: |
