@@ -50,8 +50,8 @@ jobs:
             --set podDisruptionBudget.minAvailable=1 \
             --set nodeSelector.drain-test=true \
             --wait --timeout=180s
-          # Require one resizer replica per worker so draining either worker is a real disruption.
-          kubectl patch deployment resizer-nginx-image-resizer --type=merge -p='{"spec":{"template":{"spec":{"topologySpreadConstraints":[{"maxSkew":1,"topologyKey":"kubernetes.io/hostname","whenUnsatisfiable":"DoNotSchedule","labelSelector":{"matchLabels":{"app.kubernetes.io/instance":"resizer","app.kubernetes.io/name":"nginx-image-resizer"}}}]}}}'
+          # Prefer spreading replicas across workers, without blocking rescheduling onto the surviving worker.
+          kubectl patch deployment resizer-nginx-image-resizer --type=merge -p='{"spec":{"template":{"spec":{"topologySpreadConstraints":[{"maxSkew":1,"topologyKey":"kubernetes.io/hostname","whenUnsatisfiable":"ScheduleAnyway","labelSelector":{"matchLabels":{"app.kubernetes.io/instance":"resizer","app.kubernetes.io/name":"nginx-image-resizer"}}}]}}}'
           kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=180s
           test "$(kubectl get pdb resizer-nginx-image-resizer -o jsonpath='{.status.expectedPods}')" = "2"
           test "$(kubectl get pdb resizer-nginx-image-resizer -o jsonpath='{.status.disruptionsAllowed}')" = "1"
@@ -67,7 +67,7 @@ jobs:
           successes=0
           failures=0
           for request_id in $(seq 1 30); do
-            if kubectl exec deployment/origin -- python -c "import struct; from urllib.request import urlopen; data=urlopen('http://resizer-nginx-image-resizer:8080/77x77/node-drain=$request_id.png', timeout=8).read(); assert data[:8] == bytes.fromhex('89504e470d0a1a0a'), 'response is not PNG'; width,height=struct.unpack('>II', data[16:24]); assert (width,height)==(77,57), f'unexpected dimensions: {width}x{height}'"; then
+            if kubectl exec deployment/origin -- python -c "import struct; from urllib.request import urlopen; data=urlopen('http://resizer-nginx-image-resizer:8080/77x77/sample.png?node-drain=$request_id', timeout=8).read(); assert data[:8] == bytes.fromhex('89504e470d0a1a0a'), 'response is not PNG'; width,height=struct.unpack('>II', data[16:24]); assert (width,height)==(77,57), f'unexpected dimensions: {width}x{height}'"; then
               successes=$((successes + 1))
             else
               failures=$((failures + 1))
@@ -83,7 +83,7 @@ jobs:
           kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=180s
           test "$(kubectl get deployment resizer-nginx-image-resizer -o jsonpath='{.status.readyReplicas}')" = "2"
           test "$(kubectl get pdb resizer-nginx-image-resizer -o jsonpath='{.status.disruptionsAllowed}')" = "1"
-          kubectl exec deployment/origin -- python -c "import struct; from urllib.request import urlopen; data=urlopen('http://resizer-nginx-image-resizer:8080/77x77/after-node-drain.png', timeout=8).read(); assert data[:8] == bytes.fromhex('89504e470d0a1a0a'); width,height=struct.unpack('>II', data[16:24]); assert (width,height)==(77,57)"
+          kubectl exec deployment/origin -- python -c "import struct; from urllib.request import urlopen; data=urlopen('http://resizer-nginx-image-resizer:8080/77x77/sample.png?after-node-drain=1', timeout=8).read(); assert data[:8] == bytes.fromhex('89504e470d0a1a0a'); width,height=struct.unpack('>II', data[16:24]); assert (width,height)==(77,57)"
           echo "Node drain passed: 30/30 image requests succeeded and two replicas recovered."
       - name: Diagnose node-drain failures
         if: failure()
