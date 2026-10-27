@@ -56,8 +56,10 @@ jobs:
           cleanup() {
             kill "$request_pid" 2>/dev/null || true
             kubectl logs deployment/origin --tail=50 || true
-            current_pod="$(kubectl get pods -l app.kubernetes.io/instance=resizer -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+            # A terminating pod can disappear between list and logs; select a running replacement.
+            current_pod="$(kubectl get pods -l app.kubernetes.io/instance=resizer --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
             if [ -n "$current_pod" ]; then kubectl logs "$current_pod" --all-containers=true --tail=100 || true; fi
+            return 0
           }
           trap cleanup EXIT
           started=0
