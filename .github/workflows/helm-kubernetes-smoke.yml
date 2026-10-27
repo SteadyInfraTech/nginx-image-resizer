@@ -51,7 +51,7 @@ jobs:
           if helm template resizer charts/nginx-image-resizer --set uriStyle=invalid > /dev/null 2>&1; then echo "invalid uriStyle unexpectedly passed schema validation" >&2; exit 1; fi
           if grep -Fq 'location ~ ^/(?<edge_width>' "$RUNNER_TEMP/rendered-suffix.yaml"; then echo "prefix route unexpectedly rendered for suffix style" >&2; exit 1; fi
           # NetworkPolicy is opt-in and must render the expected origin/DNS egress allowlist.
-          helm template resizer charts/nginx-image-resizer --set origin.host=origin --set image.tag=ci --set networkPolicy.enabled=true --set 'networkPolicy.origin.namespaceLabels.kubernetes.io/metadata.name=default' > "$RUNNER_TEMP/rendered-network-policy.yaml"
+          helm template resizer charts/nginx-image-resizer --set origin.host=origin --set image.tag=ci --set networkPolicy.enabled=true > "$RUNNER_TEMP/rendered-network-policy.yaml"
           grep -q '^kind: NetworkPolicy$' "$RUNNER_TEMP/rendered-network-policy.yaml"
           grep -q 'k8s-app: kube-dns' "$RUNNER_TEMP/rendered-network-policy.yaml"
           grep -q 'port: 8081' "$RUNNER_TEMP/rendered-network-policy.yaml"
