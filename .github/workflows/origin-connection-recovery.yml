@@ -13,6 +13,10 @@ jobs:
   origin-outage-recovery:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      # Expire the warm entry quickly so the outage test exercises stale-on-error,
+      # rather than merely returning a still-fresh cache hit.
+      NGINX_CACHE_VALIDITY: 2s
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -50,6 +54,21 @@ jobs:
           assert struct.unpack(">II", data[16:24]) == (77, 57), "baseline dimensions differ"
           PY
 
+          # Warm a second cache key that must remain usable during the outage.
+          status="$(curl -sS -D "$RUNNER_TEMP/stale-baseline.headers" -o "$RUNNER_TEMP/stale-baseline.png" -w '%{http_code}' 'http://127.0.0.1:8080/77x77/sample.png?origin-recovery=stale')"
+          test "$status" = "200"
+          grep -qi '^X-Cache-Status: MISS' "$RUNNER_TEMP/stale-baseline.headers"
+          python3 - "$RUNNER_TEMP/stale-baseline.png" <<'PY'
+          import struct, sys
+          data = open(sys.argv[1], "rb").read()
+          assert data[:8] == bytes.fromhex("89504e470d0a1a0a"), "stale baseline response is not PNG"
+          assert struct.unpack(">II", data[16:24]) == (77, 57), "stale baseline dimensions differ"
+          PY
+          # The 2-second cache TTL is intentional: wait until the entry is stale
+          # before killing the origin, so the next successful response proves
+          # proxy_cache_use_stale is working during an upstream failure.
+          sleep 3
+
       - name: Verify repeated failures during an origin outage
         run: |
           set -eu
@@ -57,6 +76,18 @@ jobs:
           # endpoint cleanup completes. Both an immediate refusal (502) and a connect
           # timeout (504) are valid outage responses; the dedicated timeout test asserts 504.
           docker compose kill origin
+          # An expired-but-cached image must still be served while the origin is down.
+          # A STALE cache status confirms this was not a fresh HIT.
+          stale_status="$(curl --max-time 8 -sS -D "$RUNNER_TEMP/stale-during-outage.headers" -o "$RUNNER_TEMP/stale-during-outage.png" -w '%{http_code}' 'http://127.0.0.1:8080/77x77/sample.png?origin-recovery=stale')"
+          test "$stale_status" = "200"
+          grep -qi '^X-Cache-Status: STALE' "$RUNNER_TEMP/stale-during-outage.headers"
+          cmp "$RUNNER_TEMP/stale-baseline.png" "$RUNNER_TEMP/stale-during-outage.png"
+          python3 - "$RUNNER_TEMP/stale-during-outage.png" <<'PY'
+          import struct, sys
+          data = open(sys.argv[1], "rb").read()
+          assert data[:8] == bytes.fromhex("89504e470d0a1a0a"), "stale outage response is not PNG"
+          assert struct.unpack(">II", data[16:24]) == (77, 57), "stale outage dimensions differ"
+          PY
           # Repeat the same cold-key request across a bounded outage window. This checks
           # that failures remain bounded and do not poison the response cache.
           for attempt in $(seq 1 5); do
