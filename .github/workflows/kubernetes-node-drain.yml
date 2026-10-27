@@ -65,7 +65,7 @@ jobs:
             --set replicaCount=2 \
             --set podDisruptionBudget.enabled=true \
             --set podDisruptionBudget.minAvailable=1 \
-            --set nodeSelector.drain-test=true \
+            --set-string nodeSelector.drain-test=true \
             --wait --timeout=180s
           # Prefer spreading replicas across workers, without blocking rescheduling onto the surviving worker.
           kubectl patch deployment resizer-nginx-image-resizer --type=merge -p='{"spec":{"template":{"spec":{"topologySpreadConstraints":[{"maxSkew":1,"topologyKey":"kubernetes.io/hostname","whenUnsatisfiable":"ScheduleAnyway","labelSelector":{"matchLabels":{"app.kubernetes.io/instance":"resizer","app.kubernetes.io/name":"nginx-image-resizer"}}}]}}}'
