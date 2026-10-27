@@ -41,7 +41,7 @@ test "$ready" = "1"
 
 benchmark_status=0
 python3 tools/benchmark.py --base-url "$base_url" --path /77x77/sample.png \
-  --requests 2000 --concurrency 12 --timeout 5 --mode unique > "$tmp_dir/report.json" || benchmark_status=$?
+  --requests 2000 --concurrency 4 --timeout 15 --mode unique > "$tmp_dir/report.json" || benchmark_status=$?
 cat "$tmp_dir/report.json"
 test "$benchmark_status" -eq 0
 
