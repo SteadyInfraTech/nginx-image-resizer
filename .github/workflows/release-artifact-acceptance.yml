@@ -49,6 +49,11 @@ jobs:
             echo "from_version and to_version must differ" >&2
             exit 1
           }
+          newest="$(printf '%s\\n' "$FROM_VERSION" "$TO_VERSION" | sort -V | tail -n1)"
+          [[ "$newest" == "$TO_VERSION" ]] || {
+            echo "to_version must be newer than from_version" >&2
+            exit 1
+          }
           mkdir -p "$RUNNER_TEMP/release-charts/from" "$RUNNER_TEMP/release-charts/to"
           gh release download "v$FROM_VERSION" --repo "$GITHUB_REPOSITORY" \
             --pattern "nginx-image-resizer-$FROM_VERSION.tgz" --dir "$RUNNER_TEMP/release-charts/from"
@@ -148,6 +153,20 @@ jobs:
             --set origin.host=origin --set origin.port=8081 --set replicaCount=1 \
             --wait --timeout 5m
           kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=120s
+          # port-forward targets a pod; reconnect after rollout replaces it.
+          kill "$(cat "$RUNNER_TEMP/port-forward.pid")" 2>/dev/null || true
+          for attempt in $(seq 1 10); do
+            if ! kill -0 "$(cat "$RUNNER_TEMP/port-forward.pid")" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          kubectl port-forward service/resizer-nginx-image-resizer 18080:8080 > "$RUNNER_TEMP/port-forward.log" 2>&1 &
+          echo "$!" > "$RUNNER_TEMP/port-forward.pid"
+          ready=0
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:18080/healthz >/dev/null; then ready=1; break; fi
+            sleep 1
+          done
+          test "$ready" = "1"
           echo "Upgraded to v$VERSION with image digest $DIGEST"
           curl -fsS -D "$RUNNER_TEMP/upgrade-first.headers" -o "$RUNNER_TEMP/upgrade.png" http://127.0.0.1:18080/77x77/sample.png
           grep -qi '^X-Cache-Status: MISS' "$RUNNER_TEMP/upgrade-first.headers"
@@ -161,6 +180,20 @@ jobs:
           set -euo pipefail
           helm rollback resizer 1 --wait --timeout 5m
           kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=120s
+          # Rollback replaces the pod as well, so refresh the port-forward target.
+          kill "$(cat "$RUNNER_TEMP/port-forward.pid")" 2>/dev/null || true
+          for attempt in $(seq 1 10); do
+            if ! kill -0 "$(cat "$RUNNER_TEMP/port-forward.pid")" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          kubectl port-forward service/resizer-nginx-image-resizer 18080:8080 > "$RUNNER_TEMP/port-forward.log" 2>&1 &
+          echo "$!" > "$RUNNER_TEMP/port-forward.pid"
+          ready=0
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:18080/healthz >/dev/null; then ready=1; break; fi
+            sleep 1
+          done
+          test "$ready" = "1"
           deployed_image="$(kubectl get deployment resizer-nginx-image-resizer -o jsonpath='{.spec.template.spec.containers[0].image}')"
           [[ "$deployed_image" == "ghcr.io/steadyinfratech/nginx-image-resizer@$EXPECTED_DIGEST" ]] || {
             echo "Rollback restored unexpected image: $deployed_image" >&2
