@@ -1,4 +1,5 @@
 {{- if .Values.networkPolicy.enabled }}
+{{- $originNamespaceLabels := .Values.networkPolicy.origin.namespaceLabels | default (dict "kubernetes.io/metadata.name" .Release.Namespace) }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -12,12 +13,12 @@ spec:
   policyTypes:
     - Egress
   egress:
-    # Allow the configured in-cluster origin. Override these selectors to match
-    # the origin's actual pod and namespace labels in the target cluster.
+    # By default, scope the origin to the release namespace. Set namespaceLabels
+    # explicitly when the origin runs in a different namespace.
     - to:
         - namespaceSelector:
             matchLabels:
-              {{- toYaml .Values.networkPolicy.origin.namespaceLabels | nindent 14 }}
+              {{- toYaml $originNamespaceLabels | nindent 14 }}
           podSelector:
             matchLabels:
               {{- toYaml .Values.networkPolicy.origin.podLabels | nindent 14 }}
