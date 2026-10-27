@@ -63,13 +63,17 @@ jobs:
 
           oom_seen=0
           for attempt in $(seq 1 60); do
-            pod="$(kubectl get pods -l "$selector" -o jsonpath='{.items[0].metadata.name}')"
-            restart_count="$(kubectl get pod "$pod" -o jsonpath='{.status.containerStatuses[0].restartCount}')"
-            last_reason="$(kubectl get pod "$pod" -o jsonpath='{.status.containerStatuses[0].lastState.terminated.reason}')"
-            if [ "${restart_count:-0}" -ge 1 ] && [ "$last_reason" = "OOMKilled" ]; then
-              oom_seen=1
-              break
-            fi
+            # maxUnavailable=0 keeps the original healthy pod while the faulted
+            # replacement is unready. Inspect every matching pod, not items[0],
+            # so list ordering cannot make the assertion watch the wrong replica.
+            for pod in $(kubectl get pods -l "$selector" -o jsonpath='{.items[*].metadata.name}'); do
+              restart_count="$(kubectl get pod "$pod" -o jsonpath='{.status.containerStatuses[0].restartCount}')"
+              last_reason="$(kubectl get pod "$pod" -o jsonpath='{.status.containerStatuses[0].lastState.terminated.reason}')"
+              if [ "${restart_count:-0}" -ge 1 ] && [ "$last_reason" = "OOMKilled" ]; then
+                oom_seen=1
+                break 2
+              fi
+            done
             sleep 2
           done
           test "$oom_seen" = "1"
