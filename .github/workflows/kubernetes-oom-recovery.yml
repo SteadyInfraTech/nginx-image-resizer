@@ -57,7 +57,7 @@ jobs:
           kubectl patch deployment "$deployment" --type=json -p='[
             {"op":"replace","path":"/spec/template/spec/containers/0/command","value":["/bin/sh","-c"]},
             {"op":"replace","path":"/spec/template/spec/containers/0/args","value":["x=x; while true; do x=\"$x$x\"; done"]},
-            {"op":"replace","path":"/spec/template/spec/containers/0/resources/limits/memory","value":"64Mi"}
+            {"op":"replace","path":"/spec/template/spec/containers/0/resources/limits/memory","value":"192Mi"}
           ]'
           kubectl rollout status deployment/"$deployment" --timeout=120s || true
 
