@@ -83,7 +83,8 @@ jobs:
           width, height = struct.unpack(">II", data[16:24])
           assert (width, height) == (77, 57), f"unexpected dimensions: {width}x{height}"
           PY
-          # BusyBox wget is present in the Alpine-based upstream NGINX image.
+          # Ensure the probe exists before treating a failed connection as policy enforcement.
+          kubectl exec "$pod" -- sh -c 'command -v wget >/dev/null'
           # DNS may resolve the blocked Service, but its TCP connection must time out/fail.
           if kubectl exec "$pod" -- wget -T 4 -qO- http://blocked:8081/sample.png > /dev/null 2>&1; then
             echo "NetworkPolicy regression: resizer reached a disallowed destination" >&2
