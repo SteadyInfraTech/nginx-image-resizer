@@ -50,24 +50,28 @@ jobs:
           assert struct.unpack(">II", data[16:24]) == (77, 57), "baseline dimensions differ"
           PY
 
-      - name: Verify upstream connection failure on a cold cache key
+      - name: Verify repeated failures during an origin outage
         run: |
           set -eu
           # A stopped container may leave a stale endpoint in Docker's network until
           # endpoint cleanup completes. Both an immediate refusal (502) and a connect
           # timeout (504) are valid outage responses; the dedicated timeout test asserts 504.
           docker compose kill origin
-          # A unique key ensures this request cannot succeed from a prior cache entry.
-          status="$(curl --max-time 20 -sS -o "$RUNNER_TEMP/origin-down.body" -w '%{http_code}' 'http://127.0.0.1:8080/77x77/sample.png?origin-recovery=down')"
-          echo "Cold-cache request while origin is stopped returned HTTP $status"
-          case "$status" in
-            502|504) ;;
-            *) echo "Expected HTTP 502 or 504 during origin outage, got $status" >&2; exit 1 ;;
-          esac
-          if grep -q '89504e470d0a1a0a' "$RUNNER_TEMP/origin-down.body"; then
-            echo "image response unexpectedly returned while origin was stopped" >&2
-            exit 1
-          fi
+          # Repeat the same cold-key request across a bounded outage window. This checks
+          # that failures remain bounded and do not poison the response cache.
+          for attempt in $(seq 1 5); do
+            status="$(curl --max-time 8 -sS -o "$RUNNER_TEMP/origin-down.body" -w '%{http_code}' 'http://127.0.0.1:8080/77x77/sample.png?origin-recovery=down')"
+            echo "Origin outage attempt $attempt returned HTTP $status"
+            case "$status" in
+              502|504) ;;
+              *) echo "Expected HTTP 502 or 504 during origin outage, got $status" >&2; exit 1 ;;
+            esac
+            if grep -q '89504e470d0a1a0a' "$RUNNER_TEMP/origin-down.body"; then
+              echo "image response unexpectedly returned while origin was stopped" >&2
+              exit 1
+            fi
+            if [ "$attempt" -lt 5 ]; then sleep 3; fi
+          done
 
       - name: Verify service recovers when the origin returns
         run: |
