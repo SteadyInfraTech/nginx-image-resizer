@@ -44,7 +44,9 @@ jobs:
           archive="$RUNNER_TEMP/chart/nginx-image-resizer-$version.tgz"
           packaged="$RUNNER_TEMP/chart/nginx-image-resizer-$chart_version.tgz"
           test -s "$packaged"
-          cp "$packaged" "$archive"
+          if [[ "$packaged" != "$archive" ]]; then
+            cp "$packaged" "$archive"
+          fi
           helm show chart "$archive"
           (cd "$RUNNER_TEMP/chart" && sha256sum "$(basename "$archive")" > "$(basename "$archive").sha256")
           echo "Packaged chart version=$chart_version appVersion=$version asset=$(basename "$archive")"
