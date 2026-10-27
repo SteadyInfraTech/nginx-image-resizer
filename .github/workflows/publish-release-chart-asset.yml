@@ -1,0 +1,60 @@
+name: Publish versioned Helm chart release asset
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing release tag to package and attach its chart (for backfilling older releases)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  publish-chart-asset:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out the release source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.event.release.tag_name }}
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.17.3
+      - name: Validate release metadata and package chart
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag || github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]] || {
+            echo "Expected a semantic-version release tag, got: $RELEASE_TAG" >&2
+            exit 1
+          }
+          version="${RELEASE_TAG#v}"
+          python3 tools/validate_chart_release.py --expected-app-version "$version"
+          helm lint charts/nginx-image-resizer
+          mkdir -p "$RUNNER_TEMP/chart"
+          helm package charts/nginx-image-resizer --destination "$RUNNER_TEMP/chart"
+          chart_version="$(sed -n 's/^version: *//p' charts/nginx-image-resizer/Chart.yaml | tr -d '"')"
+          archive="$RUNNER_TEMP/chart/nginx-image-resizer-$version.tgz"
+          packaged="$RUNNER_TEMP/chart/nginx-image-resizer-$chart_version.tgz"
+          test -s "$packaged"
+          cp "$packaged" "$archive"
+          helm show chart "$archive"
+          sha256sum "$archive" | tee "$archive.sha256"
+          echo "Packaged chart version=$chart_version appVersion=$version asset=$(basename "$archive")"
+      - name: Attach chart archive and checksum to the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          gh release upload "$RELEASE_TAG" \
+            "$RUNNER_TEMP/chart/nginx-image-resizer-${RELEASE_TAG#v}.tgz" \
+            "$RUNNER_TEMP/chart/nginx-image-resizer-${RELEASE_TAG#v}.tgz.sha256" \
+            --clobber
