@@ -68,8 +68,8 @@ jobs:
           test "$first_seen" = "$expected_first"
           # Update files in the mounted directory; the read-only bind mount still
           # reflects host-side certificate-manager changes. Preserve file modes.
-          install -m 644 "$RUNNER_TEMP/tls-rotation/second.crt" "$RUNNER_TEMP/tls-rotation/tls.crt.next"
-          install -m 600 "$RUNNER_TEMP/tls-rotation/second.key" "$RUNNER_TEMP/tls-rotation/tls.key.next"
+          sudo install -o root -g root -m 644 "$RUNNER_TEMP/tls-rotation/second.crt" "$RUNNER_TEMP/tls-rotation/tls.crt.next"
+          sudo install -o root -g root -m 600 "$RUNNER_TEMP/tls-rotation/second.key" "$RUNNER_TEMP/tls-rotation/tls.key.next"
           mv "$RUNNER_TEMP/tls-rotation/tls.crt.next" "$RUNNER_TEMP/tls-rotation/tls.crt"
           mv "$RUNNER_TEMP/tls-rotation/tls.key.next" "$RUNNER_TEMP/tls-rotation/tls.key"
           sudo chown root:root "$RUNNER_TEMP/tls-rotation/tls.crt" "$RUNNER_TEMP/tls-rotation/tls.key"
