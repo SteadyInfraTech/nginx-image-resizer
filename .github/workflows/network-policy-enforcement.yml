@@ -94,7 +94,7 @@ jobs:
             --set networkPolicy.enabled=true \
             --set networkPolicy.origin.podLabels.app=origin \
             --set-json 'networkPolicy.origin.namespaceLabels={"kubernetes.io/metadata.name":"default"}' \
-            --set-json 'networkPolicy.extraEgress=[{"to":[{"ipBlock":{"cidr":"1.1.1.1/32"}}],"ports":[{"protocol":"TCP","port":443]}]' \
+            --set-json 'networkPolicy.extraEgress=[{"to":[{"ipBlock":{"cidr":"1.1.1.1/32"}}],"ports":[{"protocol":"TCP","port":443}]}]' \
             --wait --timeout=180s
           kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=120s
       - name: Verify allowed origin and DNS work, while unrelated destination is blocked
@@ -137,7 +137,7 @@ jobs:
           # this probe tests policy reachability, not certificate validation.
           kubectl exec "$pod" -- wget --no-check-certificate --header='accept: application/dns-json' -T 8 -qO- 'https://1.1.1.1/dns-query?name=example.com&type=A' > /dev/null
           # 1.0.0.1 is intentionally not allow-listed; the same TCP port must be blocked.
-          if kubectl exec "$pod" -- wget --no-check-certificate -T 4 -qO- https://1.0.0.1/cdn-cgi/trace > /dev/null 2>&1; then
+          if kubectl exec "$pod" -- wget --no-check-certificate -T 4 -qO- https://1.0.0.1/dns-query?name=example.com&type=A > /dev/null 2>&1; then
             echo "NetworkPolicy regression: resizer reached an external IP outside extraEgress CIDRs" >&2
             exit 1
           fi
