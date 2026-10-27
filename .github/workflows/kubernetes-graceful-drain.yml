@@ -56,8 +56,10 @@ jobs:
           cleanup() {
             kill "$request_pid" 2>/dev/null || true
             kubectl logs deployment/origin --tail=50 || true
-            current_pod="$(kubectl get pods -l app.kubernetes.io/instance=resizer -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
+            # A terminating pod can disappear between list and logs; select a running replacement.
+            current_pod="$(kubectl get pods -l app.kubernetes.io/instance=resizer --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
             if [ -n "$current_pod" ]; then kubectl logs "$current_pod" --all-containers=true --tail=100 || true; fi
+            return 0
           }
           trap cleanup EXIT
           started=0
@@ -81,7 +83,7 @@ jobs:
           print(f"Kubernetes graceful drain passed: in-flight request completed ({width}x{height})")
           PY
           kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=120s
-          kubectl wait --for=condition=Ready pod -l app.kubernetes.io/instance=resizer --timeout=120s
+          kubectl wait --for=condition=Available deployment/resizer-nginx-image-resizer --timeout=60s
           healthy=0
           for attempt in $(seq 1 30); do
             if kubectl exec drain-client -- curl -fsS http://resizer-nginx-image-resizer:8080/healthz >/dev/null 2>&1; then healthy=1; break; fi
