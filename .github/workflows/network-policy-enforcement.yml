@@ -58,8 +58,30 @@ jobs:
           kubectl expose deployment blocked --port=8081 --target-port=8081
           # Same-label origin in another namespace must remain outside the allow-list.
           kubectl create namespace unrelated
-          kubectl -n unrelated create deployment origin-lookalike --image=steady-image-resizer-demo-origin:ci
-          kubectl -n unrelated label deployment origin-lookalike app=origin --overwrite
+          # The policy selects destination Pods, so put the matching label on the Pod
+          # template itself. Keep the Deployment selector consistent with that label.
+          cat <<'YAML' | kubectl apply -f -
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: origin-lookalike
+            namespace: unrelated
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: origin
+            template:
+              metadata:
+                labels:
+                  app: origin
+              spec:
+                containers:
+                  - name: origin
+                    image: steady-image-resizer-demo-origin:ci
+                    ports:
+                      - containerPort: 8081
+          YAML
           kubectl -n unrelated expose deployment origin-lookalike --port=8081 --target-port=8081 --name=origin-lookalike
           kubectl rollout status deployment/origin --timeout=120s
           kubectl rollout status deployment/blocked --timeout=120s
