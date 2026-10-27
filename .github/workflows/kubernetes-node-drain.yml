@@ -68,7 +68,7 @@ jobs:
             --set-string nodeSelector.drain-test=true \
             --wait --timeout=180s
           # Prefer spreading replicas across workers, without blocking rescheduling onto the surviving worker.
-          kubectl patch deployment resizer-nginx-image-resizer --type=merge -p='{"spec":{"template":{"spec":{"topologySpreadConstraints":[{"maxSkew":1,"topologyKey":"kubernetes.io/hostname","whenUnsatisfiable":"ScheduleAnyway","labelSelector":{"matchLabels":{"app.kubernetes.io/instance":"resizer","app.kubernetes.io/name":"nginx-image-resizer"}}}]}}}'
+          kubectl patch deployment resizer-nginx-image-resizer --type=merge -p='{"spec":{"template":{"spec":{"topologySpreadConstraints":[{"maxSkew":1,"topologyKey":"kubernetes.io/hostname","whenUnsatisfiable":"ScheduleAnyway","labelSelector":{"matchLabels":{"app.kubernetes.io/instance":"resizer","app.kubernetes.io/name":"nginx-image-resizer"}}}]}}}}'
           kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=180s
           test "$(kubectl get pdb resizer-nginx-image-resizer -o jsonpath='{.status.expectedPods}')" = "2"
           test "$(kubectl get pdb resizer-nginx-image-resizer -o jsonpath='{.status.disruptionsAllowed}')" = "1"
