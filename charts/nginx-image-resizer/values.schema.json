@@ -60,6 +60,6 @@
         "runSizeLimit": {"type": "string", "minLength": 1}
       }
     },
-    "networkPolicy": {"type": "object", "required": ["enabled", "origin", "extraEgress"], "properties": {"enabled": {"type": "boolean"}, "origin": {"type": "object", "required": ["namespaceLabels", "podLabels"], "properties": {"namespaceLabels": {"type": "object", "additionalProperties": {"type": "string"}}, "podLabels": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "string"}}}}, "extraEgress": {"type": "array", "items": {"type": "object", "properties": {"to": {"type": "array", "items": {"type": "object"}}, "ports": {"type": "array", "items": {"type": "object"}}}, "additionalProperties": false}}}
+    "networkPolicy": {"type": "object", "required": ["enabled", "origin", "extraEgress"], "properties": {"enabled": {"type": "boolean"}, "origin": {"type": "object", "required": ["namespaceLabels", "podLabels"], "properties": {"namespaceLabels": {"type": "object", "additionalProperties": {"type": "string"}}, "podLabels": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "string"}}}}, "extraEgress": {"type": "array", "items": {"type": "object", "properties": {"to": {"type": "array", "items": {"type": "object"}}, "ports": {"type": "array", "items": {"type": "object"}}}, "additionalProperties": false}}}}
   }
 }
