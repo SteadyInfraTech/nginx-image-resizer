@@ -94,6 +94,7 @@ jobs:
             --set networkPolicy.enabled=true \
             --set networkPolicy.origin.podLabels.app=origin \
             --set-json 'networkPolicy.origin.namespaceLabels={"kubernetes.io/metadata.name":"default"}' \
+            --set-json 'networkPolicy.extraEgress=[{"to":[{"ipBlock":{"cidr":"1.1.1.1/32"}}],"ports":[{"protocol":"TCP","port":443}]}]' \
             --wait --timeout=180s
           kubectl rollout status deployment/resizer-nginx-image-resizer --timeout=120s
       - name: Verify allowed origin and DNS work, while unrelated destination is blocked
@@ -131,7 +132,17 @@ jobs:
             echo "NetworkPolicy regression: resizer reached a matching-label origin in an unrelated namespace" >&2
             exit 1
           fi
-          echo "NetworkPolicy enforcement passed: configured origin reachable; unrelated Service and cross-namespace look-alike blocked."
+          # Exercise networkPolicy.extraEgress with an external IP CIDR and TCP port.
+          # 1.1.1.1 is a stable public HTTPS endpoint; ignore its certificate because
+          # this probe tests policy reachability, not certificate validation.
+          kubectl exec "$pod" -- sh -c "unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY all_proxy ALL_PROXY; exec wget --no-check-certificate --header='accept: application/dns-json' -T 8 -qO- 'https://1.1.1.1/dns-query?name=example.com&type=A'" > /dev/null
+          # 1.0.0.1 is intentionally not allow-listed; the same TCP port must be blocked.
+          # Clear proxy variables so this probe tests direct pod egress, not a proxy path.
+          if kubectl exec "$pod" -- sh -c "unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY all_proxy ALL_PROXY; exec wget --no-check-certificate -T 4 -qO- 'https://1.0.0.1/dns-query?name=example.com&type=A'" > /dev/null 2>&1; then
+            echo "NetworkPolicy regression: resizer reached an external IP outside extraEgress CIDRs" >&2
+            exit 1
+          fi
+          echo "NetworkPolicy enforcement passed: configured origin reachable; unrelated Services blocked; extraEgress CIDR allowed and non-allow-listed external IP blocked."
       - name: Collect diagnostics on failure
         if: failure()
         run: |
