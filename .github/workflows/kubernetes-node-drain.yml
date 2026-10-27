@@ -53,7 +53,8 @@ jobs:
           kubectl label node node-drain-worker drain-test=true
           kubectl label node node-drain-worker2 drain-test=true
           kubectl create deployment origin --image=steady-image-resizer-demo-origin:node-drain
-          kubectl patch deployment origin --type=merge -p='{"spec":{"template":{"spec":{"nodeSelector":{"kubernetes.io/hostname":"node-drain-control-plane"}}}}}'
+          # Keep the origin off the worker being drained; the control-plane is tainted by kind.
+          kubectl patch deployment origin --type=merge -p='{"spec":{"template":{"spec":{"nodeSelector":{"kubernetes.io/hostname":"node-drain-worker2"}}}}}'
           kubectl expose deployment origin --port=8081 --target-port=8081
           kubectl rollout status deployment/origin --timeout=120s
           helm upgrade --install resizer charts/nginx-image-resizer \
