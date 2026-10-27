@@ -31,6 +31,8 @@ The chart can optionally restrict resizer pod egress with `--set networkPolicy.e
 
 The `1.0.0` tag above is an example: use it only after that image tag has been published. The Helm chart has its own independent SemVer version in `Chart.yaml`; `appVersion` records the application version represented by the chart and should be updated with an application release. A chart version bump is required for chart changes, even when the application image version does not change.
 
+When a GitHub release is published, the **Publish versioned Helm chart release asset** workflow attaches `nginx-image-resizer-<app-version>.tgz` and its SHA-256 checksum to that release. It can also be run manually with an existing release tag to backfill assets. The **Release artifact acceptance** workflow takes two published application versions and installs the older release's packaged chart with its resolved image digest, verifies resize and cache MISS/HIT, upgrades to the newer chart/image pair, then rolls back and repeats the checks. It uses an ephemeral kind cluster and a local demo-origin fixture; it does not validate customer-specific CNI, ingress/TLS, external dependencies, or production load. Versioned image tags are resolved to registry digests during the run and all deployment checks use those digests.
+
 To roll back to the previous Helm revision after an upgrade:
 
     helm history image-resizer
